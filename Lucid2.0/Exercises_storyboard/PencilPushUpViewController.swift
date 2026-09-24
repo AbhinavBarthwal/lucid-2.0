@@ -1,0 +1,663 @@
+import UIKit
+import ARKit
+import AudioToolbox
+import AVFoundation
+import MediaPlayer
+
+private enum PencilPushUpExercisePhase {
+    case none, bringingCloser, waitingForReset
+}
+
+private class VideoPlayerView: UIView {
+    override static var layerClass: AnyClass {
+        return AVPlayerLayer.self
+    }
+    
+    var playerLayer: AVPlayerLayer {
+        return layer as! AVPlayerLayer
+    }
+}
+
+@MainActor
+@objc(PencilPushUpViewController)
+class PencilPushUpViewController: UIViewController, ARSessionDelegate {
+
+    @IBOutlet weak var instructionLabel: UILabel!
+    @IBOutlet weak var centerMessageLabel: UILabel!
+    @IBOutlet weak var circleView: UIView!
+    @IBOutlet weak var distanceLabel: UILabel!
+
+    private let arSession = ARSession()
+    private let speechSynthesizer = AVSpeechSynthesizer()
+    private let errorHapticGenerator = UINotificationFeedbackGenerator()
+    private let successHapticGenerator = UINotificationFeedbackGenerator()
+    private let heavyHapticGenerator = UIImpactFeedbackGenerator(style: .heavy)
+    private var isExerciseActive = true
+
+    override var prefersStatusBarHidden: Bool { return true }
+    
+    private var currentPhase: PencilPushUpExercisePhase = .none
+    
+    private var isLookingAtScreen = false
+    private var currentFaceDistance: Float = 0.0
+    private var sessionStartTime: Date?
+    private var gazeTimer: Timer?
+    
+    private var currentRep = 1
+    private let maxReps = 8
+    private var totalFramesChecked = 0
+    private var totalErrors = 0
+
+    // Video player properties
+    private var videoPlayer: AVPlayer?
+    private var videoContainerView: UIView?
+    private var videoEndObserver: NSObjectProtocol?
+    private var isVideoDismissed = false
+
+    /*
+    // MARK: - Commented Out Instructions (can be re-enabled later)
+    // Navigation/Skip buttons for instructions
+    private var instructionNextButton: UIButton?
+    private var instructionPrevButton: UIButton?
+    private var currentInstructionIndex = 0
+
+    private let exerciseInstructions: [InstructionStep] = [
+        InstructionStep(message: "Let's keep the phone at arms length.", duration: 4.5),
+        InstructionStep(message: "Focus on the green dot at the top of the display", duration: 4.5),
+        InstructionStep(message: "Bring the phone closer slowly", duration: 3.5),
+        InstructionStep(message: "You will feel one vibration when you complete a rep. If you look away, you will feel two vibrations.", duration: 6.0)
+    ]
+    */
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playAndRecord, mode: .default, options: [.mixWithOthers, .defaultToSpeaker])
+            try session.setAllowHapticsAndSystemSoundsDuringRecording(true)
+            try session.setActive(true)
+        } catch {
+            print("Audio Session error: \(error)")
+        }
+        
+        setupInitialUI()
+        arSession.delegate = self
+        errorHapticGenerator.prepare()
+        successHapticGenerator.prepare()
+        heavyHapticGenerator.prepare()
+        centerMessageLabel.alpha = 0
+        startIntroSequence()
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        isExerciseActive = true
+        self.navigationController?.setNavigationBarHidden(false, animated: animated)
+        self.tabBarController?.tabBar.isHidden = true
+        guard ARFaceTrackingConfiguration.isSupported else { return }
+        let config = ARFaceTrackingConfiguration()
+        arSession.run(config, options: [.resetTracking, .removeExistingAnchors])
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        isExerciseActive = false
+        self.tabBarController?.tabBar.isHidden = false
+        arSession.pause()
+        gazeTimer?.invalidate(); gazeTimer = nil
+        circleView.layer.removeAllAnimations()
+        centerMessageLabel.layer.removeAllAnimations()
+        instructionLabel.layer.removeAllAnimations()
+        currentPhase = .none
+        isLookingAtScreen = false
+        
+        if let observer = videoEndObserver {
+            NotificationCenter.default.removeObserver(observer)
+            videoEndObserver = nil
+        }
+        videoPlayer?.pause()
+        videoPlayer = nil
+        videoContainerView?.removeFromSuperview()
+        videoContainerView = nil
+        
+        if speechSynthesizer.isSpeaking {
+            speechSynthesizer.stopSpeaking(at: .immediate)
+        }
+    }
+
+    private func startIntroSequence() {
+        var videoURL = Bundle.main.url(forResource: "the_phone_should_be_brought_fo", withExtension: "mp4")
+        if videoURL == nil, let path = Bundle.main.path(forResource: "the_phone_should_be_brought_fo", ofType: "mp4") {
+            videoURL = URL(fileURLWithPath: path)
+        }
+        
+        if let videoURL {
+            playInstructionVideo(url: videoURL)
+        } else {
+            directlyStartExercise()
+        }
+    }
+
+    private func playInstructionVideo(url: URL) {
+        let container = UIView()
+        container.backgroundColor = .black
+        container.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(container)
+        self.videoContainerView = container
+        
+        NSLayoutConstraint.activate([
+            container.topAnchor.constraint(equalTo: view.topAnchor),
+            container.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            container.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            container.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+        
+        let playerView = VideoPlayerView()
+        playerView.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(playerView)
+        
+        NSLayoutConstraint.activate([
+            playerView.topAnchor.constraint(equalTo: container.topAnchor),
+            playerView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            playerView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            playerView.trailingAnchor.constraint(equalTo: container.trailingAnchor)
+        ])
+        
+        let playerItem = AVPlayerItem(url: url)
+        let player = AVPlayer(playerItem: playerItem)
+        player.volume = 1.0
+        self.videoPlayer = player
+        playerView.playerLayer.player = player
+        playerView.playerLayer.videoGravity = .resizeAspect
+        
+        let skipBtn = UIButton(type: .system)
+        skipBtn.translatesAutoresizingMaskIntoConstraints = false
+        skipBtn.setTitle("Skip", for: .normal)
+        skipBtn.titleLabel?.font = .systemFont(ofSize: 16, weight: .medium)
+        skipBtn.setTitleColor(.white, for: .normal)
+        skipBtn.backgroundColor = UIColor.white.withAlphaComponent(0.25)
+        skipBtn.layer.cornerRadius = 17
+        skipBtn.layer.cornerCurve = .continuous
+        skipBtn.addTarget(self, action: #selector(skipVideoTapped), for: .touchUpInside)
+        container.addSubview(skipBtn)
+        
+        NSLayoutConstraint.activate([
+            skipBtn.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
+            skipBtn.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
+            skipBtn.widthAnchor.constraint(equalToConstant: 72),
+            skipBtn.heightAnchor.constraint(equalToConstant: 34)
+        ])
+        
+        videoEndObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: playerItem,
+            queue: .main
+        ) { [weak self] _ in
+            self?.dismissVideoAndStartExercise()
+        }
+        
+        player.play()
+    }
+
+    @objc private func skipVideoTapped() {
+        dismissVideoAndStartExercise()
+    }
+
+    private func dismissVideoAndStartExercise() {
+        guard !isVideoDismissed else { return }
+        isVideoDismissed = true
+        
+        if let observer = videoEndObserver {
+            NotificationCenter.default.removeObserver(observer)
+            videoEndObserver = nil
+        }
+        videoPlayer?.pause()
+        
+        guard let container = videoContainerView else {
+            directlyStartExercise()
+            return
+        }
+        
+        UIView.animate(withDuration: 0.4, animations: {
+            container.alpha = 0
+        }) { [weak self] _ in
+            guard let self = self else { return }
+            container.removeFromSuperview()
+            self.videoContainerView = nil
+            self.videoPlayer = nil
+            self.directlyStartExercise()
+        }
+    }
+
+    private func directlyStartExercise() {
+        guard isExerciseActive, currentPhase == .none else { return }
+        maximizeSystemVolume()
+        InstructionTracker.markAsCompleted(for: "PencilPushup")
+        runStartCountdown { [weak self] in
+            guard let self = self, self.isExerciseActive, self.currentPhase == .none else { return }
+            self.sessionStartTime = Date()
+            self.startBringingCloserPhase()
+        }
+    }
+
+    private func maximizeSystemVolume() {
+        let volumeView = MPVolumeView(frame: CGRect(x: -1000, y: -1000, width: 1, height: 1))
+        if let windowScene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
+           let window = windowScene.windows.first(where: { $0.isKeyWindow }) ?? windowScene.windows.first {
+            window.addSubview(volumeView)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                for subview in volumeView.subviews {
+                    if let slider = subview as? UISlider {
+                        slider.setValue(1.0, animated: false)
+                        break
+                    }
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    volumeView.removeFromSuperview()
+                }
+            }
+        }
+    }
+
+    private func speak(_ text: String) {
+        guard isExerciseActive else { return }
+        maximizeSystemVolume()
+        if speechSynthesizer.isSpeaking {
+            speechSynthesizer.stopSpeaking(at: .immediate)
+        }
+        let utterance = AVSpeechUtterance(string: text)
+        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        utterance.rate = 0.5
+        utterance.volume = 1.0
+        speechSynthesizer.speak(utterance)
+    }
+
+    /*
+    // MARK: - Commented Out Instructions (can be re-enabled later)
+    private func startInstructionsSequence() {
+        guard isExerciseActive, currentPhase == .none else { return }
+        setupInstructionButtons()
+        runInstructionSequence(index: 0)
+    }
+
+    private func runInstructionSequence(index: Int) {
+        guard isExerciseActive, currentPhase == .none else { return }
+        currentInstructionIndex = index
+        let isFirstRun = InstructionTracker.isFirstRun(for: "PencilPushup")
+        
+        if index < exerciseInstructions.count {
+            let step = exerciseInstructions[index]
+            
+            if isFirstRun {
+                instructionNextButton?.isHidden = false
+                let canGoBack = index > 0
+                instructionPrevButton?.isHidden = !canGoBack
+                
+                let isLastStep = (index == exerciseInstructions.count - 1)
+                instructionNextButton?.setTitle(isLastStep ? "Start Exercise" : "Next", for: .normal)
+            } else {
+                instructionNextButton?.isHidden = false
+                instructionPrevButton?.isHidden = true
+                instructionNextButton?.setTitle("Skip", for: .normal)
+            }
+            
+            UIView.animate(withDuration: 0.4, animations: {
+                self.centerMessageLabel.alpha = 0
+            }) { _ in
+                guard self.isExerciseActive, self.currentPhase == .none else { return }
+                self.centerMessageLabel.text = step.message
+                UIView.animate(withDuration: 0.4, animations: {
+                    self.centerMessageLabel.alpha = 1
+                }) { _ in
+                    if !isFirstRun {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + step.duration) { [weak self] in
+                            guard let self = self, self.isExerciseActive, self.currentPhase == .none, self.currentInstructionIndex == index else { return }
+                            self.runInstructionSequence(index: index + 1)
+                        }
+                    }
+                }
+            }
+        } else {
+            finishInstructionsAndStartExercise()
+        }
+    }
+
+    private func setupInstructionButtons() {
+        let isFirstRun = InstructionTracker.isFirstRun(for: "PencilPushup")
+        
+        let nextBtn = UIButton(type: .system)
+        nextBtn.translatesAutoresizingMaskIntoConstraints = false
+        nextBtn.layer.cornerRadius = 25
+        nextBtn.layer.cornerCurve = .continuous
+        nextBtn.titleLabel?.font = .systemFont(ofSize: 18, weight: .bold)
+        nextBtn.setTitleColor(.white, for: .normal)
+        nextBtn.backgroundColor = UIColor(named: "AccentColor") ?? .systemOrange
+        view.addSubview(nextBtn)
+        self.instructionNextButton = nextBtn
+        nextBtn.addTarget(self, action: #selector(instructionNextTapped), for: .touchUpInside)
+        
+        if isFirstRun {
+            nextBtn.setTitle("Next", for: .normal)
+            
+            let prevBtn = UIButton(type: .system)
+            prevBtn.translatesAutoresizingMaskIntoConstraints = false
+            prevBtn.layer.cornerRadius = 25
+            prevBtn.layer.cornerCurve = .continuous
+            prevBtn.titleLabel?.font = .systemFont(ofSize: 16, weight: .medium)
+            prevBtn.setTitleColor(.white, for: .normal)
+            prevBtn.backgroundColor = .clear
+            prevBtn.layer.borderWidth = 1
+            prevBtn.layer.borderColor = UIColor.white.withAlphaComponent(0.3).cgColor
+            prevBtn.setTitle("Previous", for: .normal)
+            view.addSubview(prevBtn)
+            self.instructionPrevButton = prevBtn
+            prevBtn.addTarget(self, action: #selector(instructionPrevTapped), for: .touchUpInside)
+            
+            NSLayoutConstraint.activate([
+                nextBtn.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 24),
+                nextBtn.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -24),
+                nextBtn.bottomAnchor.constraint(equalTo: prevBtn.topAnchor, constant: -12),
+                nextBtn.heightAnchor.constraint(equalToConstant: 50),
+                
+                prevBtn.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 24),
+                prevBtn.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -24),
+                prevBtn.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
+                prevBtn.heightAnchor.constraint(equalToConstant: 50)
+            ])
+            
+            prevBtn.isHidden = true // Hidden initially for step 0
+        } else {
+            nextBtn.setTitle("Skip", for: .normal)
+            
+            NSLayoutConstraint.activate([
+                nextBtn.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 24),
+                nextBtn.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -24),
+                nextBtn.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
+                nextBtn.heightAnchor.constraint(equalToConstant: 50)
+            ])
+        }
+    }
+    
+    @objc private func instructionNextTapped() {
+        if InstructionTracker.isFirstRun(for: "PencilPushup") {
+            runInstructionSequence(index: currentInstructionIndex + 1)
+        } else {
+            finishInstructionsAndStartExercise()
+        }
+    }
+    
+    @objc private func instructionPrevTapped() {
+        if InstructionTracker.isFirstRun(for: "PencilPushup") && currentInstructionIndex > 0 {
+            runInstructionSequence(index: currentInstructionIndex - 1)
+        }
+    }
+    
+    private func finishInstructionsAndStartExercise() {
+        InstructionTracker.markAsCompleted(for: "PencilPushup")
+        currentInstructionIndex = 999
+        
+        UIView.animate(withDuration: 0.3, animations: {
+            self.instructionNextButton?.alpha = 0
+            self.instructionPrevButton?.alpha = 0
+        }) { _ in
+            self.instructionNextButton?.removeFromSuperview()
+            self.instructionPrevButton?.removeFromSuperview()
+        }
+        
+        runStartCountdown { [weak self] in
+            guard let self = self, self.isExerciseActive, self.currentPhase == .none else { return }
+            self.sessionStartTime = Date()
+            self.startBringingCloserPhase()
+        }
+    }
+    */
+
+    private func runStartCountdown(completion: @escaping () -> Void) {
+        UIView.animate(withDuration: 0.2, animations: {
+            self.centerMessageLabel.alpha = 0
+        }) { _ in
+            self.centerMessageLabel.text = "3"
+            UIView.animate(withDuration: 0.3, animations: {
+                self.centerMessageLabel.alpha = 1
+            }) { _ in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                    guard let self = self, self.isExerciseActive, self.currentPhase == .none else { return }
+                    UIView.animate(withDuration: 0.2, animations: {
+                        self.centerMessageLabel.alpha = 0
+                    }) { _ in
+                        self.centerMessageLabel.text = "2"
+                        UIView.animate(withDuration: 0.3, animations: {
+                            self.centerMessageLabel.alpha = 1
+                        }) { _ in
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                                guard let self = self, self.isExerciseActive, self.currentPhase == .none else { return }
+                                UIView.animate(withDuration: 0.2, animations: {
+                                    self.centerMessageLabel.alpha = 0
+                                }) { _ in
+                                    self.centerMessageLabel.text = "1"
+                                    UIView.animate(withDuration: 0.3, animations: {
+                                        self.centerMessageLabel.alpha = 1
+                                    }) { _ in
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                                            guard let self = self, self.isExerciseActive, self.currentPhase == .none else { return }
+                                            UIView.animate(withDuration: 0.3, animations: {
+                                                self.centerMessageLabel.alpha = 0
+                                            }) { _ in
+                                                self.centerMessageLabel.text = ""
+                                                completion()
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func startBringingCloserPhase() {
+        guard isExerciseActive else { return }
+        currentPhase = .bringingCloser
+        self.instructionLabel.textColor = .lightGray
+        self.instructionLabel.text = "Bring your phone closer"
+        self.circleView.transform = .identity
+        
+        speak("Bring your phone closer")
+        
+        UIView.animate(withDuration: 0.3, animations: {
+            self.centerMessageLabel.alpha = 0
+        }) { _ in
+            guard self.isExerciseActive else { return }
+            self.fadeTransition(showCenterMessage: false, showExerciseUI: true) {
+                guard self.isExerciseActive else { return }
+                self.startGazeMonitor()
+            }
+        }
+    }
+
+    private func handleFullRepCompletion() {
+        guard isExerciseActive else { return }
+        Vibrator.playSuccess()
+        gazeTimer?.invalidate()
+        
+        if currentRep < maxReps {
+            currentRep += 1
+            currentPhase = .waitingForReset
+            
+            fadeTransition(showCenterMessage: false, showExerciseUI: false) { [weak self] in
+                guard let self = self, self.isExerciseActive else { return }
+                self.instructionLabel.text = nil
+                self.centerMessageLabel.text = "take your phone back"
+                self.speak("take your phone back")
+                UIView.animate(withDuration: 0.5) {
+                    self.centerMessageLabel.alpha = 1
+                }
+            }
+        } else {
+            currentPhase = .none
+            finishExercise()
+        }
+    }
+
+    private func finishExercise() {
+        guard isExerciseActive else { return }
+        gazeTimer?.invalidate()
+        currentPhase = .none
+        
+        let startTime = sessionStartTime ?? Date()
+        let elapsedSeconds = Int(Date().timeIntervalSince(startTime))
+        let accuracy = totalFramesChecked > 0 ? Int((Double(totalFramesChecked - totalErrors) / Double(totalFramesChecked)) * 100.0) : 0
+        
+        let context = SwiftDataManager.shared.context
+        let user = SwiftDataManager.shared.getOrCreateUser()
+        let newSession = ExerciseSession(
+            type: "PencilPushup",
+            duration: elapsedSeconds,
+            accuracy: accuracy,
+            errors: totalErrors
+        )
+        newSession.user = user
+        context.insert(newSession)
+        
+        do {
+            try context.save()
+            Vibrator.playHeavy()
+        } catch {
+            print("❌ Pencil Push-Ups Save failed: \(error)")
+        }
+        
+        fadeTransition(showCenterMessage: false, showExerciseUI: false) { [weak self] in
+            guard let self = self, self.isExerciseActive else { return }
+            let messages = [
+                "Fantastic job!",
+                "Great work!",
+                "Awesome focus!",
+                "Excellent effort!",
+                "Superb session!",
+                "Nicely done!",
+                "Brilliant job!"
+            ]
+            self.centerMessageLabel.font = .systemFont(ofSize: 36, weight: .bold)
+            self.centerMessageLabel.text = messages.randomElement() ?? "Exercise Complete!"
+            UIView.animate(withDuration: 0.5, animations: {
+                self.centerMessageLabel.alpha = 1
+            }) { _ in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                    guard self.isExerciseActive else { return }
+                    self.isExerciseActive = false
+                    NotificationCenter.default.post(
+                        name: .legacyExerciseDidComplete,
+                        object: nil,
+                        userInfo: [
+                            "type": "PencilPushup",
+                            "accuracy": accuracy
+                        ]
+                    )
+                    if let nav = self.navigationController {
+                        nav.popViewController(animated: true)
+                    } else {
+                        self.dismiss(animated: true)
+                    }
+                }
+            }
+        }
+    }
+
+    private func checkDistanceGoal() {
+        if currentPhase == .bringingCloser {
+            if currentFaceDistance > 0 && currentFaceDistance <= 0.21 && isLookingAtScreen {
+                handleFullRepCompletion()
+            }
+        } else if currentPhase == .waitingForReset {
+            if currentFaceDistance >= 0.40 {
+                Vibrator.playHeavy()
+                startBringingCloserPhase()
+            }
+        }
+    }
+
+    func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
+        guard isExerciseActive, let faceAnchor = anchors.compactMap({ $0 as? ARFaceAnchor }).first else {
+            isLookingAtScreen = false
+            return
+        }
+        
+        let lookAt = faceAnchor.lookAtPoint
+        isLookingAtScreen = abs(lookAt.x) < 0.2 && abs(lookAt.y) < 0.2
+        
+        let transform = faceAnchor.transform
+        let distance = sqrt(pow(transform.columns.3.x, 2) + pow(transform.columns.3.y, 2) + pow(transform.columns.3.z, 2))
+        self.currentFaceDistance = distance
+        
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, self.isExerciseActive else { return }
+            if self.currentPhase != .none {
+                let distanceInCM = Int(self.currentFaceDistance * 100)
+                self.distanceLabel.text = "\(distanceInCM) cm"
+                self.checkDistanceGoal()
+            }
+        }
+    }
+
+    private func setupInitialUI() {
+        circleView.layer.cornerRadius = circleView.bounds.width / 2
+        circleView.backgroundColor = .accent
+        distanceLabel.alpha = 0
+        instructionLabel.alpha = 0
+        circleView.alpha = 0
+        circleView.isHidden = true
+        centerMessageLabel.alpha = 0
+        
+        instructionLabel.font = .systemFont(ofSize: 20, weight: .semibold)
+        instructionLabel.textColor = .lightGray
+        instructionLabel.textAlignment = .center
+        instructionLabel.numberOfLines = 0
+        
+        centerMessageLabel.font = .systemFont(ofSize: 32, weight: .bold)
+        centerMessageLabel.textColor = .white
+        centerMessageLabel.textAlignment = .center
+        centerMessageLabel.numberOfLines = 0
+        
+        distanceLabel.numberOfLines = 0
+    }
+
+    private func fadeTransition(showCenterMessage: Bool, showExerciseUI: Bool, completion: (() -> Void)? = nil) {
+        UIView.animate(withDuration: 0.5, animations: {
+            self.centerMessageLabel.alpha = showCenterMessage ? 1 : 0
+            self.instructionLabel.alpha = showExerciseUI ? 1 : 0
+            self.circleView.alpha = 0
+            self.distanceLabel.alpha = showExerciseUI ? 1 : 0
+        }) { _ in
+            completion?()
+        }
+    }
+
+    @MainActor private func startGazeMonitor() {
+        gazeTimer?.invalidate()
+        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            Task { @MainActor in
+                guard self.isExerciseActive, self.currentPhase == .bringingCloser else { return }
+                self.totalFramesChecked += 1
+                if self.isLookingAtScreen {
+                    if self.instructionLabel.text != "Bring your phone closer" {
+                        UIView.animate(withDuration: 0.3) { self.instructionLabel.alpha = 0 }
+                    }
+                } else {
+                    self.totalErrors += 1
+                    Vibrator.playError()
+                    self.instructionLabel.textColor = .systemRed
+                    self.instructionLabel.text = "Please look at the green dot at the top of the display"
+                    self.instructionLabel.alpha = 1
+                }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        self.gazeTimer = timer
+    }
+
+
+}

@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="24765" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES" initialViewController="Gb3-N5-TTw">
+    <device id="retina6_12" orientation="portrait" appearance="light"/>
+    <dependencies>
+        <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="24743"/>
+        <capability name="Safe area layout guides" minToolsVersion="9.0"/>
+        <capability name="System colors in document resources" minToolsVersion="11.0"/>
+        <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
+    </dependencies>
+    <scenes>
+        <!--Blink Training View Controller-->
+        <scene sceneID="9W4-e1-Fnk">
+            <objects>
+                <viewController storyboardIdentifier="BlinkTrainingVC" useStoryboardIdentifierAsRestorationIdentifier="YES" id="Gb3-N5-TTw" customClass="BlinkTrainingViewController" customModule="Lucid2_0" customModuleProvider="target" sceneMemberID="viewController">
+                    <view key="view" contentMode="scaleToFill" id="1sP-0S-309">
+                        <rect key="frame" x="0.0" y="0.0" width="440" height="894"/>
+                        <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                        <subviews>
+                            <arscnView clipsSubviews="YES" multipleTouchEnabled="YES" contentMode="scaleToFill" translatesAutoresizingMaskIntoConstraints="NO" id="62U-uL-F7K">
+                                <rect key="frame" x="0.0" y="62" width="440" height="832"/>
+                                <color key="backgroundColor" white="0.0" alpha="0.0" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
+                            </arscnView>
+                            <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="" textAlignment="center" lineBreakMode="tailTruncation" numberOfLines="0" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="Xc2-eH-0Pt">
+                                <rect key="frame" x="220" y="834" width="0.0" height="0.0"/>
+                                <fontDescription key="fontDescription" style="UICTFontTextStyleTitle2"/>
+                                <color key="textColor" white="1" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
+                                <nil key="highlightedColor"/>
+                            </label>
+                            <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="" textAlignment="natural" lineBreakMode="tailTruncation" numberOfLines="0" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="PWJ-Ob-Fyh">
+                                <rect key="frame" x="220" y="122" width="0.0" height="0.0"/>
+                                <fontDescription key="fontDescription" style="UICTFontTextStyleTitle0"/>
+                                <nil key="textColor"/>
+                                <nil key="highlightedColor"/>
+                            </label>
+                            <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="" textAlignment="center" lineBreakMode="tailTruncation" numberOfLines="0" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="FQm-Do-fsc">
+                                <rect key="frame" x="20" y="447" width="400" height="0.0"/>
+                                <fontDescription key="fontDescription" style="UICTFontTextStyleTitle3"/>
+                                <nil key="textColor"/>
+                                <nil key="highlightedColor"/>
+                            </label>
+                        </subviews>
+                        <viewLayoutGuide key="safeArea" id="9jD-sD-xhz"/>
+                        <color key="backgroundColor" systemColor="systemBackgroundColor"/>
+                        <constraints>
+                            <constraint firstItem="FQm-Do-fsc" firstAttribute="centerY" secondItem="1sP-0S-309" secondAttribute="centerY" id="0pW-rg-DCg"/>
+                            <constraint firstItem="PWJ-Ob-Fyh" firstAttribute="top" secondItem="9jD-sD-xhz" secondAttribute="top" constant="60" id="27r-m9-rvd"/>
+                            <constraint firstItem="62U-uL-F7K" firstAttribute="trailing" secondItem="9jD-sD-xhz" secondAttribute="trailing" id="5HJ-uP-C6q"/>
+                            <constraint firstItem="FQm-Do-fsc" firstAttribute="leading" secondItem="9jD-sD-xhz" secondAttribute="leading" constant="20" id="9Lt-LL-WfF"/>
+                            <constraint firstItem="FQm-Do-fsc" firstAttribute="centerX" secondItem="1sP-0S-309" secondAttribute="centerX" id="9jX-bH-c7I"/>
+                            <constraint firstAttribute="bottom" secondItem="Xc2-eH-0Pt" secondAttribute="bottom" constant="60" id="BHT-xJ-4kK"/>
+                            <constraint firstItem="62U-uL-F7K" firstAttribute="bottom" secondItem="9jD-sD-xhz" secondAttribute="bottom" id="BdP-C1-Nec"/>
+                            <constraint firstItem="9jD-sD-xhz" firstAttribute="trailing" secondItem="62U-uL-F7K" secondAttribute="trailing" id="Lwm-Qg-gT2"/>
+                            <constraint firstItem="PWJ-Ob-Fyh" firstAttribute="centerX" secondItem="1sP-0S-309" secondAttribute="centerX" id="Mr0-Oa-A26"/>
+                            <constraint firstItem="62U-uL-F7K" firstAttribute="top" secondItem="9jD-sD-xhz" secondAttribute="top" id="YiI-Km-No6"/>
+                            <constraint firstItem="9jD-sD-xhz" firstAttribute="bottom" secondItem="62U-uL-F7K" secondAttribute="bottom" id="c8M-wg-ABA"/>
+                            <constraint firstItem="62U-uL-F7K" firstAttribute="top" secondItem="9jD-sD-xhz" secondAttribute="top" id="ckp-ez-q8P"/>
+                            <constraint firstItem="9jD-sD-xhz" firstAttribute="trailing" secondItem="FQm-Do-fsc" secondAttribute="trailing" constant="20" id="oBp-vb-m9P"/>
+                            <constraint firstItem="Xc2-eH-0Pt" firstAttribute="centerX" secondItem="1sP-0S-309" secondAttribute="centerX" id="qEb-KZ-mmE"/>
+                            <constraint firstItem="62U-uL-F7K" firstAttribute="leading" secondItem="9jD-sD-xhz" secondAttribute="leading" id="vjH-w3-ssT"/>
+                            <constraint firstItem="62U-uL-F7K" firstAttribute="leading" secondItem="9jD-sD-xhz" secondAttribute="leading" id="xiD-JY-2yh"/>
+                        </constraints>
+                    </view>
+                    <connections>
+                        <outlet property="centerMessageLAbel" destination="FQm-Do-fsc" id="lDI-HB-Lbp"/>
+                        <outlet property="instructionLabel" destination="Xc2-eH-0Pt" id="0V7-8Q-DZh"/>
+                        <outlet property="largeCountLabel" destination="PWJ-Ob-Fyh" id="9D6-vK-55u"/>
+                        <outlet property="sceneView" destination="62U-uL-F7K" id="Z3L-vA-h3D"/>
+                    </connections>
+                </viewController>
+                <placeholder placeholderIdentifier="IBFirstResponder" id="6pQ-QI-bTg" userLabel="First Responder" customClass="UIResponder" sceneMemberID="firstResponder"/>
+            </objects>
+            <point key="canvasLocation" x="5578" y="-845"/>
+        </scene>
+    </scenes>
+    <resources>
+        <systemColor name="systemBackgroundColor">
+            <color white="1" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
+        </systemColor>
+    </resources>
+</document>

@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="24765" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES" initialViewController="0ce-i1-YqH">
+    <device id="retina6_12" orientation="portrait" appearance="light"/>
+    <dependencies>
+        <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="24743"/>
+        <capability name="Safe area layout guides" minToolsVersion="9.0"/>
+        <capability name="Named colors" minToolsVersion="9.0"/>
+        <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
+    </dependencies>
+    <scenes>
+        <!--Near Far Focus View Controller-->
+        <scene sceneID="W0n-UE-yod">
+            <objects>
+                <viewController storyboardIdentifier="NearFarFocusVC" useStoryboardIdentifierAsRestorationIdentifier="YES" id="0ce-i1-YqH" customClass="NearFarFocusViewController" customModule="Lucid2_0" customModuleProvider="target" sceneMemberID="viewController">
+                    <view key="view" contentMode="scaleToFill" id="adv-k2-edC">
+                        <rect key="frame" x="0.0" y="0.0" width="440" height="894"/>
+                        <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                        <subviews>
+                            <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="" textAlignment="center" lineBreakMode="tailTruncation" numberOfLines="0" baselineAdjustment="alignBaselines" adjustsFontForContentSizeCategory="YES" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="UR9-p3-ome">
+                                <rect key="frame" x="220" y="122" width="0.0" height="0.0"/>
+                                <fontDescription key="fontDescription" style="UICTFontTextStyleTitle0"/>
+                                <color key="textColor" white="1" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
+                                <nil key="highlightedColor"/>
+                            </label>
+                            <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="" textAlignment="center" lineBreakMode="tailTruncation" numberOfLines="0" baselineAdjustment="alignBaselines" adjustsFontForContentSizeCategory="YES" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="Tzu-0B-rBM">
+                                <rect key="frame" x="20" y="834" width="400" height="0.0"/>
+                                <fontDescription key="fontDescription" style="UICTFontTextStyleTitle3"/>
+                                <color key="textColor" white="0.66666666669999997" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
+                                <nil key="highlightedColor"/>
+                            </label>
+                            <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="" textAlignment="center" lineBreakMode="tailTruncation" numberOfLines="0" baselineAdjustment="alignBaselines" adjustsFontForContentSizeCategory="YES" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="WgA-XM-cjO">
+                                <rect key="frame" x="20" y="447" width="400" height="0.0"/>
+                                <fontDescription key="fontDescription" style="UICTFontTextStyleTitle2"/>
+                                <color key="textColor" white="1" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
+                                <nil key="highlightedColor"/>
+                            </label>
+                            <view contentMode="scaleToFill" translatesAutoresizingMaskIntoConstraints="NO" id="aZv-We-kXG">
+                                <rect key="frame" x="120" y="347" width="200" height="200"/>
+                                <color key="backgroundColor" name="AccentColor"/>
+                                <constraints>
+                                    <constraint firstAttribute="width" constant="200" id="9hK-PX-GFv"/>
+                                    <constraint firstAttribute="height" constant="200" id="Zi3-dk-Bwc"/>
+                                </constraints>
+                            </view>
+                        </subviews>
+                        <viewLayoutGuide key="safeArea" id="dwb-N3-Man"/>
+                        <color key="backgroundColor" white="0.0" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
+                        <constraints>
+                            <constraint firstItem="aZv-We-kXG" firstAttribute="centerY" secondItem="adv-k2-edC" secondAttribute="centerY" id="1Vy-lS-dnn"/>
+                            <constraint firstItem="dwb-N3-Man" firstAttribute="bottom" secondItem="Tzu-0B-rBM" secondAttribute="bottom" constant="60" id="2VE-X5-VCZ"/>
+                            <constraint firstItem="aZv-We-kXG" firstAttribute="centerX" secondItem="adv-k2-edC" secondAttribute="centerX" id="2zM-9Y-oaW"/>
+                            <constraint firstItem="WgA-XM-cjO" firstAttribute="leading" secondItem="dwb-N3-Man" secondAttribute="leading" constant="20" id="3zW-ED-Wb2"/>
+                            <constraint firstItem="WgA-XM-cjO" firstAttribute="centerX" secondItem="adv-k2-edC" secondAttribute="centerX" id="8H4-nL-i1r"/>
+                            <constraint firstItem="UR9-p3-ome" firstAttribute="top" secondItem="dwb-N3-Man" secondAttribute="top" constant="60" id="KVy-WV-Xal"/>
+                            <constraint firstItem="dwb-N3-Man" firstAttribute="trailing" secondItem="Tzu-0B-rBM" secondAttribute="trailing" constant="20" id="U41-J1-0kB"/>
+                            <constraint firstItem="Tzu-0B-rBM" firstAttribute="leading" secondItem="dwb-N3-Man" secondAttribute="leading" constant="20" id="c9r-zZ-vu4"/>
+                            <constraint firstItem="dwb-N3-Man" firstAttribute="trailing" secondItem="WgA-XM-cjO" secondAttribute="trailing" constant="20" id="i6U-Hs-xgR"/>
+                            <constraint firstItem="UR9-p3-ome" firstAttribute="centerX" secondItem="adv-k2-edC" secondAttribute="centerX" id="kGr-uS-zVn"/>
+                            <constraint firstItem="WgA-XM-cjO" firstAttribute="centerY" secondItem="adv-k2-edC" secondAttribute="centerY" id="tBF-ul-Q5c"/>
+                        </constraints>
+                    </view>
+                    <connections>
+                        <outlet property="centerMessageLabel" destination="WgA-XM-cjO" id="ew0-Zi-rSm"/>
+                        <outlet property="circleView" destination="aZv-We-kXG" id="EKT-X9-egd"/>
+                        <outlet property="instructionLabel" destination="Tzu-0B-rBM" id="hAF-RR-Vfi"/>
+                        <outlet property="timerLabel" destination="UR9-p3-ome" id="vpT-MD-toM"/>
+                    </connections>
+                </viewController>
+                <placeholder placeholderIdentifier="IBFirstResponder" id="HPP-6w-Jsz" userLabel="First Responder" customClass="UIResponder" sceneMemberID="firstResponder"/>
+            </objects>
+            <point key="canvasLocation" x="6238" y="-1646"/>
+        </scene>
+    </scenes>
+    <resources>
+        <namedColor name="AccentColor">
+            <color red="0.20392156862745098" green="0.82745098039215681" blue="0.60000000000000009" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+        </namedColor>
+    </resources>
+</document>

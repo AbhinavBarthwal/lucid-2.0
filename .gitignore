@@ -1,0 +1,40 @@
+# Xcode
+## User settings
+xcuserdata/
+*.xcuserdatad/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+
+## Build generated
+build/
+DerivedData/
+*.moved-aside
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.Spotlight-V100
+.Trashes
+*.db
+
+# Temporary / Cache
+.cache/
+/build/
+/DerivedData/
+/*.mp4
+/*.mov
+
+# Old subfolder with separate git history
+/Lucid/
+.git.backup/
