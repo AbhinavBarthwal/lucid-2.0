@@ -3,11 +3,8 @@
 //  Lucid2.0
 //
 //  Bottom sheet shown when a user taps an exercise card.
-//
-//  Flow:
-//  - First time: shows an info blurb, then "Show Instructions" + "Start Exercise"
-//  - Returning:  shows "Show Instructions" (ghost) + "Start Exercise" (primary CTA)
-//  - Camera gate: for requiresCamera exercises, checks AVCaptureDevice permission before starting
+//  Uses dynamic SF-symbol artwork instead of photos.
+//  When starting, triggers an animated shade transition taking the user into the exercise.
 //
 
 import SwiftUI
@@ -23,6 +20,7 @@ public struct ExerciseDetailSheet: View {
     @State private var showCameraAlert = false
     @State private var showSettingsAlert = false
     @State private var hasShownInstructions = false
+    @State private var isStartingShade = false
 
     public init(
         exercise: ExerciseDefinition,
@@ -41,11 +39,9 @@ public struct ExerciseDetailSheet: View {
             Color(red: 0.05, green: 0.06, blue: 0.12).ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // MARK: - Hero Image
+                // MARK: - Hero Artwork
                 ZStack(alignment: .bottomLeading) {
-                    Image(exercise.imageName)
-                        .resizable()
-                        .scaledToFill()
+                    ExerciseArtworkView(exercise: exercise, style: .hero, isLaunching: isStartingShade)
                         .frame(maxWidth: .infinity)
                         .frame(height: 240)
                         .clipped()
@@ -211,6 +207,18 @@ public struct ExerciseDetailSheet: View {
                 .fill(Color.white.opacity(0.2))
                 .frame(width: 36, height: 4)
                 .padding(.top, 12)
+
+            // Animated Shade Overlay when starting exercise
+            if isStartingShade {
+                ExerciseShadeTransitionView(
+                    exercise: exercise,
+                    mode: .cover,
+                    onCovered: {
+                        onStart()
+                    }
+                )
+                .zIndex(100)
+            }
         }
         .alert("Camera Access Required", isPresented: $showCameraAlert) {
             Button("Open Settings") {
@@ -254,21 +262,24 @@ public struct ExerciseDetailSheet: View {
         withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
             isFirstRun = false
         }
-        // In a future iteration, this would launch a video player
-        // For now it collapses the info blurb (confirming they've read it)
     }
 
     private func handleStartExercise() {
+        let launch = {
+            ExerciseInstructionTracker.shared.markSeen(for: exercise.id)
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                isStartingShade = true
+            }
+        }
+
         if exercise.requiresCamera {
             checkCameraPermission { granted in
                 if granted {
-                    ExerciseInstructionTracker.shared.markSeen(for: exercise.id)
-                    onStart()
+                    launch()
                 }
             }
         } else {
-            ExerciseInstructionTracker.shared.markSeen(for: exercise.id)
-            onStart()
+            launch()
         }
     }
 

@@ -58,8 +58,8 @@ public final class SupabaseService: ObservableObject {
         let conditions = record["previous_conditions"] as? [String] ?? []
         let screenHours = (record["screen_time_numeric"] as? NSNumber)?.doubleValue ?? 6.0
         let actualHours = (record["device_activity_actual_hours"] as? NSNumber)?.doubleValue
-        let activity = record["primary_activity"] as? String ?? "General / Multitasking"
-        let peakTime = record["peak_fatigue_time"] as? String ?? "Evening (after 7 PM)"
+        let activity = record["primary_activity"] as? String ?? "Coding & Reading"
+        let peakTime = record["peak_fatigue_time"] as? String ?? "Late Day (5–8)"
 
         var recs: [String] = []
         var baselineScore = 70
@@ -235,8 +235,8 @@ public final class SupabaseService: ObservableObject {
                         previousConditions: [],
                         estimatedDailyScreenTimeHours: 6.0,
                         actualDailyScreenTimeHours: 0.0,
-                        primaryActivity: "General / Multitasking",
-                        peakFatigueTime: "Evening (after 7 PM)",
+                        primaryActivity: "Coding & Reading",
+                        peakFatigueTime: "Late Day (5–8)",
                         recommendedExerciseIds: [],
                         baselineRestScore: 70
                     )

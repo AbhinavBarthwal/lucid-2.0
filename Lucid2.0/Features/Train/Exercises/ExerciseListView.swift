@@ -188,6 +188,7 @@ public struct ExerciseListView: View {
             scheduler.completeCurrentExercise(score: 0.95)
             scoreEngine.updateExerciseProgress(stack: scheduler.currentStack)
         } else {
+            StreakManager.shared.recordExerciseCompleted(exerciseId: exercise.id)
             scoreEngine.updateExerciseProgress(stack: scheduler.currentStack)
         }
     }

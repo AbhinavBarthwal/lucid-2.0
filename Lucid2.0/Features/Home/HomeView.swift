@@ -24,11 +24,13 @@ public struct HomeView: View {
     @State private var baseline: CGFloat?
     @State private var showNotificationSetup = false
     @State private var showProfile = false
+    @State private var showStreakDetail = false
 
-    // MARK: - Test, Exercise & Score State
+    // MARK: - Test, Exercise, Score & Streak State
     @State private var testManager = TestScheduleManager.shared
     @State private var exerciseScheduler = DailyExerciseScheduler.shared
     @State private var scoreEngine = LucidScoreEngine.shared
+    @State private var streakManager = StreakManager.shared
     @State private var currentPrompt: String = ""
     @State private var activeExercise: ExerciseDefinition?
 
@@ -84,8 +86,8 @@ public struct HomeView: View {
                             .transition(.opacity.combined(with: .scale(scale: 0.98)))
                         }
 
-                        // 5. Streak Card
-                        StreakCard(count: 0)
+                        // 5. Streak Card (Connected to real exercises & interactive sheet)
+                        StreakCard()
                     }
                     .padding(.horizontal, 22)
                     .padding(.top, 18)
@@ -125,7 +127,11 @@ public struct HomeView: View {
             .ignoresSafeArea(edges: .top)
 
             // Top Header Bar
-            HomeHeaderBar(streakCount: 0, onProfileTapped: { showProfile = true })
+            HomeHeaderBar(
+                streakCount: streakManager.currentStreak,
+                onStreakTapped: { showStreakDetail = true },
+                onProfileTapped: { showProfile = true }
+            )
         }
         .animation(.spring(response: 0.45, dampingFraction: 0.85), value: showNotificationSetup)
         .animation(.spring(response: 0.45, dampingFraction: 0.85), value: testManager.isTestDue)
@@ -133,6 +139,11 @@ public struct HomeView: View {
         .animation(.spring(response: 0.45, dampingFraction: 0.85), value: blockingVM.blocks.isEmpty)
         .sheet(isPresented: $blockingVM.showPopup) {
             AppBlockingPopupView(viewModel: blockingVM)
+        }
+        .sheet(isPresented: $showStreakDetail) {
+            StreakDetailSheet()
+                .presentationDetents([.fraction(0.85), .large])
+                .presentationDragIndicator(.visible)
         }
         .fullScreenCover(item: $activeExercise) { exercise in
             ExerciseSessionView(
@@ -150,6 +161,7 @@ public struct HomeView: View {
             ProfileView()
         }
         .onAppear {
+            streakManager.refreshStreakState()
             blockingVM.loadBlocks()
             testManager.checkDueStatus()
             exerciseScheduler.loadOrGenerateDailyStack()
@@ -160,6 +172,7 @@ public struct HomeView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
+                streakManager.refreshStreakState()
                 Task {
                     await updateNotificationSetupVisibility()
                 }

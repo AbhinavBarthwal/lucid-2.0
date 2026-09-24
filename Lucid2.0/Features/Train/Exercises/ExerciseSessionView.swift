@@ -4,6 +4,7 @@
 //
 //  SwiftUI wrapper that hosts legacy UIKit Storyboard exercises
 //  and bridges their lifecycle and completion events to SwiftUI.
+//  Presents an animated shade reveal transition on entry.
 //
 
 import SwiftUI
@@ -16,6 +17,7 @@ public struct ExerciseSessionView: View {
     
     @Environment(\.dismiss) private var dismiss
     @State private var hasTriggeredCompletion = false
+    @State private var showShadeReveal = true
 
     public init(
         exercise: ExerciseDefinition,
@@ -62,6 +64,21 @@ public struct ExerciseSessionView: View {
                 .padding(16)
             }
             .buttonStyle(.plain)
+
+            // Animated shade rolling up / revealing the session
+            if showShadeReveal {
+                ExerciseShadeTransitionView(
+                    exercise: exercise,
+                    mode: .reveal,
+                    onRevealed: {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            showShadeReveal = false
+                        }
+                    }
+                )
+                .transition(.opacity)
+                .zIndex(100)
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .legacyExerciseDidComplete)) { _ in
             guard !hasTriggeredCompletion else { return }

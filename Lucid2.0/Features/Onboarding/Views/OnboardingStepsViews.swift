@@ -321,7 +321,11 @@ public struct ScreenTimeStepView: View {
     @Binding public var hours: Double
     @Binding public var primaryActivity: String
     @Binding public var peakFatigueTime: String
-    public let actualHours: Double?
+    @Binding public var actualHours: Double?
+
+    @State private var isAuthorized: Bool = ScreenTimeService.shared.isAuthorized
+    @State private var isConnecting: Bool = false
+    @State private var authErrorMessage: String? = nil
 
     private let activities = [
         ("Coding & Reading", "laptopcomputer"),
@@ -341,12 +345,12 @@ public struct ScreenTimeStepView: View {
         hours: Binding<Double>,
         primaryActivity: Binding<String>,
         peakFatigueTime: Binding<String>,
-        actualHours: Double? = nil
+        actualHours: Binding<Double?>
     ) {
         self._hours = hours
         self._primaryActivity = primaryActivity
         self._peakFatigueTime = peakFatigueTime
-        self.actualHours = actualHours
+        self._actualHours = actualHours
     }
 
     public var body: some View {
@@ -396,39 +400,8 @@ public struct ScreenTimeStepView: View {
                 .frame(maxWidth: .infinity)
                 .cardBackground(top: Palette.cardTop, bottom: Palette.cardBottom, corner: 24)
 
-                // Discrepancy Pill / Alert
-                if let actual = actualHours {
-                    let delta = actual - hours
-                    let diffString = String(format: "%.1f", abs(delta))
-                    HStack(alignment: .top, spacing: 12) {
-                        Image(systemName: delta > 0 ? "exclamationmark.triangle.fill" : "checkmark.seal.fill")
-                            .font(Typography.title3())
-                            .foregroundStyle(delta > 0 ? Palette.amber : Color.green)
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(delta > 0 ? "Screen Time Discrepancy Detected" : "Healthy Self-Awareness")
-                                .font(Typography.headline())
-                                .foregroundStyle(.white)
-
-                            Text(delta > 0
-                                 ? "Device Activity averages ~\(String(format: "%.1f", actual)) hrs/day (\(diffString) hrs higher than your estimate). Luc will account for this extra strain."
-                                 : "Your actual screen activity matches your perception closely. Great awareness!")
-                                .font(Typography.footnote())
-                                .foregroundStyle(Color.white.opacity(0.75))
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    .padding(16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .fill(Palette.amber.opacity(0.1))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                    .strokeBorder(Palette.amber.opacity(0.3), lineWidth: 1)
-                            )
-                    )
-                }
+                // Apple Screen Time API Verification / Connection Card
+                screenTimeAPICard
 
                 // Primary Activity Selection
                 VStack(alignment: .leading, spacing: 10) {
@@ -508,6 +481,184 @@ public struct ScreenTimeStepView: View {
             }
             .padding(.top, 16)
             .padding(.bottom, 24)
+        }
+    }
+
+    // MARK: - Screen Time API Card
+    private var screenTimeAPICard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color(red: 0.12, green: 0.28, blue: 0.65).opacity(0.25))
+                        .frame(width: 36, height: 36)
+
+                    Image(systemName: "hourglass.badge.eye")
+                        .font(Typography.subheadline(weight: .bold))
+                        .foregroundStyle(Color(red: 0.35, green: 0.65, blue: 1.0))
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Apple Screen Time API")
+                        .font(Typography.subheadline(weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+
+                    Text(isAuthorized ? "Connected to FamilyControls" : "Real Device Activity Sync")
+                        .font(Typography.caption2(weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.55))
+                }
+
+                Spacer()
+
+                if isAuthorized {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(Typography.caption2(weight: .bold))
+                        Text("Connected")
+                            .font(Typography.caption2(weight: .bold, design: .rounded))
+                    }
+                    .foregroundStyle(Color.green)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(Color.green.opacity(0.14)))
+                } else {
+                    HStack(spacing: 4) {
+                        Image(systemName: "lock.shield")
+                            .font(Typography.caption2(weight: .medium))
+                        Text("Not Linked")
+                            .font(Typography.caption2(weight: .medium, design: .rounded))
+                    }
+                    .foregroundStyle(Color.white.opacity(0.45))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(Color.white.opacity(0.06)))
+                }
+            }
+
+            if isAuthorized {
+                // When authorized: Show verified Device Activity comparison
+                if let actual = actualHours {
+                    let delta = actual - hours
+                    let diffString = String(format: "%.1f", abs(delta))
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: delta > 0 ? "exclamationmark.triangle.fill" : "checkmark.seal.fill")
+                            .font(Typography.subheadline())
+                            .foregroundStyle(delta > 0 ? Palette.amber : Color.green)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(delta > 0 ? "Screen Time Gap Identified" : "Healthy Self-Awareness")
+                                .font(Typography.subheadline(weight: .semibold, design: .rounded))
+                                .foregroundStyle(.white)
+
+                            Text(delta > 0
+                                 ? "Apple Screen Time reports ~\(String(format: "%.1f", actual)) hrs/day (\(diffString) hrs higher than your estimate). Luc will account for this extra strain in your daily training."
+                                 : "Device Activity averages ~\(String(format: "%.1f", actual)) hrs/day, matching your perception closely. Great awareness!")
+                                .font(Typography.footnote())
+                                .foregroundStyle(Color.white.opacity(0.75))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(Palette.amber.opacity(0.08))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .strokeBorder(Palette.amber.opacity(0.25), lineWidth: 1)
+                            )
+                    )
+                }
+            } else {
+                // Not authorized: Don't guess. Provide honest prompt & connect button
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Lucid doesn't guess your habits. Connect Apple Screen Time to verify your true daily screen exposure and prevent eye strain lockups.")
+                        .font(Typography.footnote())
+                        .foregroundStyle(Color.white.opacity(0.7))
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if let err = authErrorMessage {
+                        Text(err)
+                            .font(Typography.caption2())
+                            .foregroundStyle(Color.red.opacity(0.9))
+                    }
+
+                    Button {
+                        connectScreenTime()
+                    } label: {
+                        HStack(spacing: 8) {
+                            if isConnecting {
+                                ProgressView()
+                                    .tint(.white)
+                                    .scaleEffect(0.8)
+                            } else {
+                                Image(systemName: "link.badge.plus")
+                                    .font(Typography.subheadline(weight: .semibold))
+                            }
+
+                            Text(isConnecting ? "Requesting Access..." : "Connect Screen Time")
+                                .font(Typography.subheadline(weight: .semibold, design: .rounded))
+                        }
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 42)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [Color(red: 0.15, green: 0.35, blue: 0.85), Color(red: 0.10, green: 0.22, blue: 0.60)],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    )
+                                )
+                                .glassEffect(.clear, in: .rect(cornerRadius: 12))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isConnecting)
+                }
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity)
+        .cardBackground(top: Color(red: 0.08, green: 0.12, blue: 0.22), bottom: Color(red: 0.05, green: 0.07, blue: 0.15), corner: 22)
+        .onAppear {
+            isAuthorized = ScreenTimeService.shared.isAuthorized
+            if isAuthorized && actualHours == nil {
+                actualHours = ScreenTimeService.shared.fetchActualDailyScreenTime(estimated: hours)
+            }
+        }
+        .onChange(of: hours) { _, newHours in
+            if isAuthorized {
+                actualHours = ScreenTimeService.shared.fetchActualDailyScreenTime(estimated: newHours)
+            }
+        }
+    }
+
+    private func connectScreenTime() {
+        isConnecting = true
+        authErrorMessage = nil
+        Task {
+            do {
+                try await ScreenTimeService.shared.requestAuthorization()
+                await MainActor.run {
+                    isConnecting = false
+                    isAuthorized = ScreenTimeService.shared.isAuthorized
+                    if isAuthorized {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        actualHours = ScreenTimeService.shared.fetchActualDailyScreenTime(estimated: hours)
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    isConnecting = false
+                    authErrorMessage = "Authorization failed: \(error.localizedDescription)"
+                }
+            }
         }
     }
 }

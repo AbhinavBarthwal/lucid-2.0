@@ -95,7 +95,11 @@ public final class DailyExerciseScheduler {
         currentStack.items[index].completedAt = Date()
         currentStack.items[index].accuracyScore = score
 
+        let completedExerciseId = currentStack.items[index].exercise.id
         persistStack()
+
+        // Sync with StreakManager
+        StreakManager.shared.recordExerciseCompleted(exerciseId: completedExerciseId)
     }
 
     public func resetDailyStack() {

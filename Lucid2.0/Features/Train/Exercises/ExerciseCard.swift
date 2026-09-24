@@ -3,7 +3,7 @@
 //  Lucid2.0
 //
 //  Horizontal-scroll card for a single exercise.
-//  Shows: thumbnail image, title, subtitle, duration pill.
+//  Shows: dynamic multi-SF-symbol glowing artwork, title, subtitle, duration pill.
 //
 
 import SwiftUI
@@ -26,14 +26,11 @@ public struct ExerciseCard: View {
     public var body: some View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 0) {
-                // MARK: - Thumbnail
+                // MARK: - Thumbnail with Glowing SF Symbol Artwork
                 ZStack(alignment: .topTrailing) {
-                    Image(exercise.imageName)
-                        .resizable()
-                        .scaledToFill()
+                    ExerciseArtworkView(exercise: exercise, style: .card)
                         .frame(width: cardWidth, height: cardWidth)
                         .clipped()
-                        
                         .overlay(alignment: .bottom) {
                             VStack(alignment: .leading, spacing: 4) {
                                 Spacer().frame(height: 50)
@@ -72,7 +69,7 @@ public struct ExerciseCard: View {
                             .frame(width: cardWidth, alignment: .leading)
                             .background {
                                 LinearGradient(
-                                    colors: [.clear, Palette.cardBottom],
+                                    colors: [.clear, Palette.cardBottom.opacity(0.95)],
                                     startPoint: .top,
                                     endPoint: .bottom
                                 )
@@ -80,10 +77,6 @@ public struct ExerciseCard: View {
                         }
                 }
                 .cornerRadius(24)
-                
-
-                // MARK: - Info Strip
-               
             }
             .frame(width: cardWidth)
             .cardBackground(top: Palette.cardTop, bottom: Palette.cardBottom, corner: 18)
@@ -127,7 +120,6 @@ public struct ExerciseCard: View {
     }
 
     private var cardWidth: CGFloat { 160 }
-    private var imageHeight: CGFloat { 110 }
 }
 
 // MARK: - Recommended Exercise Card (wider, full-width)
@@ -144,22 +136,21 @@ public struct RecommendedExerciseCard: View {
     public var body: some View {
         Button(action: onTap) {
             HStack(spacing: 0) {
-                // Left: Image panel
+                // Left: Dynamic SF Symbol artwork panel
                 Color.clear
                     .frame(width: 110, height: 110)
                     .overlay {
                         ZStack(alignment: .trailing) {
-                            Image(exercise.imageName)
-                                .resizable()
-                                .scaledToFill()
+                            ExerciseArtworkView(exercise: exercise, style: .banner)
+                                .frame(width: 110, height: 110)
 
-                            // Side fade
+                            // Side fade into card body
                             LinearGradient(
                                 colors: [.clear, Palette.cardTop],
                                 startPoint: .leading,
                                 endPoint: .trailing
                             )
-                            .frame(width: 40)
+                            .frame(width: 32)
                         }
                     }
                     .clipped()

@@ -2,15 +2,16 @@
 //  TestDetailSheet.swift
 //  Lucid2.0
 //
-//  Bottom sheet shown when a user taps a vision test card.
+//  Half/medium presentation sheet showing details for a selected vision test.
+//  Uses dynamic SF-symbol artwork instead of photos.
 //
 
 import SwiftUI
 
 public struct TestDetailSheet: View {
     public let test: TestDefinition
-    public var onStart: () -> Void
-    public var onDismiss: () -> Void
+    public let onStart: () -> Void
+    public let onDismiss: () -> Void
 
     public init(
         test: TestDefinition,
@@ -28,11 +29,9 @@ public struct TestDetailSheet: View {
             Color(red: 0.05, green: 0.06, blue: 0.12).ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // MARK: - Hero Image
+                // MARK: - Hero Artwork
                 ZStack {
-                    Image(test.imageName)
-                        .resizable()
-                        .scaledToFill()
+                    ExerciseArtworkView(test: test, style: .hero)
                         .frame(maxWidth: .infinity)
                         .frame(height: 220)
                         .clipped()
@@ -83,50 +82,75 @@ public struct TestDetailSheet: View {
                             )
                         }
 
-                        // Description card
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "info.circle.fill")
-                                    .font(Typography.footnote())
-                                    .foregroundStyle(Palette.amber)
-                                Text("About this test")
-                                    .font(Typography.footnote(weight: .semibold))
-                                    .foregroundStyle(Palette.amber)
-                            }
-                            Text(test.description)
-                                .font(Typography.callout())
-                                .foregroundStyle(Color.white.opacity(0.75))
-                                .fixedSize(horizontal: false, vertical: true)
-                                .lineSpacing(3)
-                        }
-                        .padding(14)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .fill(Palette.amber.opacity(0.07))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                        .strokeBorder(Palette.amber.opacity(0.2), lineWidth: 1)
-                                )
-                        )
+                        // Target Area Badges
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("TARGET METRIC")
+                                .font(Typography.caption2(weight: .bold))
+                                .foregroundStyle(Palette.amber)
+                                .kerning(1.2)
 
-                        // How the score is used
-                        HStack(spacing: 8) {
-                            Image(systemName: "chart.line.uptrend.xyaxis")
-                                .font(Typography.caption(weight: .semibold))
-                                .foregroundStyle(Color.white.opacity(0.55))
-                            Text("Your result contributes to your overall Lucid Score")
-                                .font(Typography.caption())
-                                .foregroundStyle(Color.white.opacity(0.5))
+                            HStack(spacing: 8) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: test.systemIcon)
+                                        .font(Typography.caption2())
+                                    Text(test.title)
+                                        .font(Typography.caption2(weight: .medium))
+                                }
+                                .foregroundStyle(.white.opacity(0.85))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(
+                                    Capsule()
+                                        .fill(Color.white.opacity(0.08))
+                                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.8))
+                                )
+                            }
                         }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                        // Clinical Description
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("CLINICAL OVERVIEW")
+                                .font(Typography.caption2(weight: .bold))
+                                .foregroundStyle(Palette.amber)
+                                .kerning(1.2)
+
+                            Text(test.description)
+                                .font(Typography.body())
+                                .foregroundStyle(Color.white.opacity(0.85))
+                                .lineSpacing(4)
+                        }
+
+                        // Instructions / Steps
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("WHAT TO EXPECT")
+                                .font(Typography.caption2(weight: .bold))
+                                .foregroundStyle(Palette.amber)
+                                .kerning(1.2)
+
+                            ForEach(Array(testInstructions.enumerated()), id: \.offset) { index, step in
+                                HStack(alignment: .top, spacing: 12) {
+                                    ZStack {
+                                        Circle()
+                                            .fill(Palette.amber.opacity(0.15))
+                                            .frame(width: 24, height: 24)
+                                        Text("\(index + 1)")
+                                            .font(Typography.caption2(weight: .bold))
+                                            .foregroundStyle(Palette.amber)
+                                    }
+
+                                    Text(step)
+                                        .font(Typography.subheadline())
+                                        .foregroundStyle(Color.white.opacity(0.8))
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                        .padding(16)
                         .background(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
                                 .fill(Color.white.opacity(0.04))
                                 .overlay(
-                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
                                         .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
                                 )
                         )
@@ -166,6 +190,27 @@ public struct TestDetailSheet: View {
                 .fill(Color.white.opacity(0.2))
                 .frame(width: 36, height: 4)
                 .padding(.top, 12)
+        }
+    }
+
+    private var testInstructions: [String] {
+        switch test.id {
+        case "landolt_c":
+            return [
+                "Hold phone at arm's length (about 40 cm / 16 in).",
+                "Cover one eye with your free hand.",
+                "Look at the ring and identify the direction of the opening (up, down, left, right).",
+                "Repeat with the other eye when prompted."
+            ]
+        case "osdi":
+            return [
+                "Answer each question honestly based on the past week.",
+                "Rate how often you felt eye irritation or blurriness.",
+                "Takes less than 2 minutes to complete.",
+                "Your score will be saved and tracked over time."
+            ]
+        default:
+            return ["Follow the on-screen instructions to complete the vision assessment."]
         }
     }
 }

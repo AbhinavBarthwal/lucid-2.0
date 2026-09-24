@@ -107,20 +107,20 @@ public struct PersonalizedPlanRevealView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(spacing: 8) {
                             Image(systemName: "chart.xyaxis.line")
-                                .font(.footnote.weight(.semibold))
+                                .font(Typography.footnote(weight: .semibold))
                                 .foregroundStyle(Palette.amber)
                             Text("Screen Time Insight")
-                                .font(.footnote.weight(.bold))
+                                .font(Typography.footnote(weight: .bold, design: .rounded))
                                 .foregroundStyle(Palette.amber)
                         }
 
                         Text(disc.message)
-                            .font(.subheadline)
+                            .font(Typography.subheadline())
                             .foregroundStyle(Color.white.opacity(0.85))
                             .fixedSize(horizontal: false, vertical: true)
 
                         Text(disc.recommendationNote)
-                            .font(.caption)
+                            .font(Typography.caption())
                             .foregroundStyle(Color.white.opacity(0.6))
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -134,10 +134,10 @@ public struct PersonalizedPlanRevealView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
                         Image(systemName: "dumbbell.fill")
-                            .font(.footnote.weight(.semibold))
+                            .font(Typography.footnote(weight: .semibold))
                             .foregroundStyle(Palette.amber)
                         Text("Daily Exercise Focus")
-                            .font(.headline)
+                            .font(Typography.headline(weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
                     }
 

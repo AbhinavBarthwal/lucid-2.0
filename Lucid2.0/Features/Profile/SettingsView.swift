@@ -27,7 +27,7 @@ public struct SettingsView: View {
     @AppStorage("lucid_setting_sound") private var soundEnabled: Bool = true
     @AppStorage("lucid_setting_strict_mode") private var strictModeEnabled: Bool = false
     
-    @State private var supabase = SupabaseService.shared
+    @ObservedObject private var supabase = SupabaseService.shared
     @State private var areSystemNotificationsEnabled: Bool = false
     @State private var showLogoutDialog: Bool = false
     @State private var isSavingProfile: Bool = false
@@ -37,30 +37,12 @@ public struct SettingsView: View {
     @State private var nameInput: String = ""
     @State private var leftEyeInput: Double = 0.0
     @State private var rightEyeInput: Double = 0.0
-    @State private var primaryActivity: String = "General / Multitasking"
-    @State private var peakFatigueTime: String = "Evening (after 7 PM)"
     
     public var onLogout: (() -> Void)? = nil
 
     public init(onLogout: (() -> Void)? = nil) {
         self.onLogout = onLogout
     }
-
-    private let primaryActivities = [
-        "Engineering / Coding",
-        "Design & Creative",
-        "Reading & Writing",
-        "Gaming & Streaming",
-        "Finance & Spreadsheets",
-        "General / Multitasking"
-    ]
-
-    private let fatigueTimes = [
-        "Morning (9 AM - 12 PM)",
-        "Afternoon (1 PM - 4 PM)",
-        "Late Afternoon (4 PM - 7 PM)",
-        "Evening (after 7 PM)"
-    ]
 
     public var body: some View {
         ZStack(alignment: .top) {
@@ -337,54 +319,6 @@ public struct SettingsView: View {
                         }
                     }
                 }
-
-                // Primary Activity Picker
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Primary Screen Activity")
-                        .font(Typography.caption(weight: .medium, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.5))
-
-                    Picker("Primary Activity", selection: $primaryActivity) {
-                        ForEach(primaryActivities, id: \.self) { act in
-                            Text(act).tag(act)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .tint(.white)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .background {
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color.white.opacity(0.04))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.08), lineWidth: 1)
-                            }
-                    }
-                }
-
-                // Peak Fatigue Time
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Peak Fatigue Window")
-                        .font(Typography.caption(weight: .medium, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.5))
-
-                    Picker("Peak Fatigue", selection: $peakFatigueTime) {
-                        ForEach(fatigueTimes, id: \.self) { time in
-                            Text(time).tag(time)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .tint(.white)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .background {
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color.white.opacity(0.04))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.08), lineWidth: 1)
-                            }
-                    }
-                }
             }
             .padding(18)
             .background {
@@ -560,23 +494,6 @@ public struct SettingsView: View {
                     }
                 }
                 .tint(Palette.amber)
-
-                Divider().background(.white.opacity(0.08))
-
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Baseline Screen Goal")
-                            .font(Typography.subheadline(weight: .semibold, design: .rounded))
-                            .foregroundStyle(.white)
-                        Text("Target maximum daily screen usage")
-                            .font(Typography.caption2(design: .rounded))
-                            .foregroundStyle(.white.opacity(0.45))
-                    }
-                    Spacer()
-                    Text(String(format: "%.1f hrs", supabase.currentProfile?.estimatedDailyScreenTimeHours ?? 6.0))
-                        .font(Typography.subheadline(weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                }
             }
             .padding(18)
             .background {
@@ -737,8 +654,6 @@ public struct SettingsView: View {
             nameInput = current.name
             leftEyeInput = current.leftEyePower
             rightEyeInput = current.rightEyePower
-            primaryActivity = current.primaryActivity
-            peakFatigueTime = current.peakFatigueTime
         }
     }
 
@@ -749,8 +664,6 @@ public struct SettingsView: View {
         updated.leftEyePower = leftEyeInput
         updated.rightEyePower = rightEyeInput
         updated.hasGlassesOrContacts = abs(leftEyeInput) > 0.1 || abs(rightEyeInput) > 0.1
-        updated.primaryActivity = primaryActivity
-        updated.peakFatigueTime = peakFatigueTime
         updated.updatedAt = Date()
 
         supabase.saveLocalProfile(updated)

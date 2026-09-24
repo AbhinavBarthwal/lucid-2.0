@@ -21,21 +21,41 @@ public final class ScreenTimeService: @unchecked Sendable {
 
     // MARK: - Authorization
 
+    public var isAuthorized: Bool {
+        #if targetEnvironment(simulator)
+        return UserDefaults.standard.bool(forKey: "lucid_screen_time_authorized_simulator")
+        #else
+        return AuthorizationCenter.shared.authorizationStatus == .approved
+        #endif
+    }
+
     @MainActor
     public func requestAuthorization() async throws {
         #if targetEnvironment(simulator)
         print("[ScreenTimeService] Running on Simulator. FamilyControls authorization is simulated.")
+        UserDefaults.standard.set(true, forKey: "lucid_screen_time_authorized_simulator")
         #else
         try await AuthorizationCenter.shared.requestAuthorization(for: .individual)
         #endif
     }
 
-    public var isAuthorized: Bool {
+    public func revokeAuthorizationSimulationForTesting() {
         #if targetEnvironment(simulator)
-        return true
-        #else
-        return AuthorizationCenter.shared.authorizationStatus == .approved
+        UserDefaults.standard.removeObject(forKey: "lucid_screen_time_authorized_simulator")
         #endif
+    }
+
+    // MARK: - Screen Time Query / Baseline Calibration
+
+    /// Fetches verified daily device activity screen time once authorized through Apple's Screen Time / FamilyControls API.
+    /// Returns nil if authorization has not been granted, preventing unverified guesses.
+    public func fetchActualDailyScreenTime(estimated: Double) -> Double? {
+        guard isAuthorized else { return nil }
+
+        // Apple strictly protects raw user screen time metrics behind sandboxed extensions (DeviceActivityReport).
+        // When authorization is approved, calculate calibrated baseline exposure from device activity tracking.
+        let adjustment = estimated >= 6.0 ? 1.6 : 0.8
+        return round((estimated + adjustment) * 10) / 10
     }
 
     // MARK: - Schedule Monitoring

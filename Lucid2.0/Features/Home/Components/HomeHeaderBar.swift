@@ -9,10 +9,12 @@ import SwiftUI
 
 public struct HomeHeaderBar: View {
     public var streakCount: Int = 0
+    public var onStreakTapped: (() -> Void)? = nil
     public var onProfileTapped: (() -> Void)? = nil
 
-    public init(streakCount: Int = 0, onProfileTapped: (() -> Void)? = nil) {
+    public init(streakCount: Int = 0, onStreakTapped: (() -> Void)? = nil, onProfileTapped: (() -> Void)? = nil) {
         self.streakCount = streakCount
+        self.onStreakTapped = onStreakTapped
         self.onProfileTapped = onProfileTapped
     }
 
@@ -24,14 +26,24 @@ public struct HomeHeaderBar: View {
 
             Spacer()
 
-            HStack(spacing: 6) {
-                Image(systemName: "drop.fill")
-                    .font(Typography.title2())
-                    .foregroundStyle(Palette.warmGradient)
-                Text("\(streakCount)")
-                    .font(Typography.title2(weight: .medium, design: .rounded))
-                    .foregroundStyle(Color.white.opacity(0.5))
+            Button {
+                onStreakTapped?()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "flame.fill")
+                        .font(Typography.title2())
+                        .foregroundStyle(
+                            streakCount > 0
+                            ? Palette.warmGradient
+                            : LinearGradient(colors: [Color.white.opacity(0.4), Color.gray.opacity(0.3)], startPoint: .top, endPoint: .bottom)
+                        )
+                    Text("\(streakCount)")
+                        .font(Typography.title2(weight: .medium, design: .rounded))
+                        .foregroundStyle(streakCount > 0 ? Color.white.opacity(0.85) : Color.white.opacity(0.4))
+                }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
             .padding(.trailing, 22)
 
             Button {

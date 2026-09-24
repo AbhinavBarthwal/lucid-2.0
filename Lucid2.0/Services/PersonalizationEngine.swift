@@ -62,7 +62,8 @@ public final class PersonalizationEngine {
             selectedExerciseIds.insert("pencil_pushup")
         }
 
-        if profile.peakFatigueTime.contains("Evening") || screenHours >= 9.0 {
+        let isLateOrEvening = profile.peakFatigueTime.contains("Evening") || profile.peakFatigueTime.contains("Late") || profile.peakFatigueTime.contains("Night")
+        if isLateOrEvening || screenHours >= 9.0 {
             selectedExerciseIds.insert("figure_8")
         }
 
@@ -91,30 +92,31 @@ public final class PersonalizationEngine {
         baseScore -= min(conditions.count * 3, 15)
         let startingRest = max(45, min(85, baseScore))
 
-        // 3. Screen Time Discrepancy Analysis
+        // 3. Screen Time Discrepancy Analysis (Only if Screen Time API was authorized)
         var discrepancy: ScreenDiscrepancyInsight? = nil
-        let actual = profile.actualDailyScreenTimeHours ?? fetchSimulatedActualScreenTime(estimated: screenHours)
-        let delta = actual - screenHours
+        if let actual = profile.actualDailyScreenTimeHours {
+            let delta = actual - screenHours
 
-        if abs(delta) >= 1.0 {
-            let isOver = delta > 0
-            let diffFormatted = String(format: "%.1f", abs(delta))
-            let msg = isOver
-                ? "Your actual screen usage averages ~\(String(format: "%.1f", actual)) hrs/day (\(diffFormatted) hrs higher than estimated). That extra screen exposure significantly accelerates tear evaporation and focus lock."
-                : "Your actual screen usage averages ~\(String(format: "%.1f", actual)) hrs/day. You're already doing better than you thought!"
+            if abs(delta) >= 0.5 {
+                let isOver = delta > 0
+                let diffFormatted = String(format: "%.1f", abs(delta))
+                let msg = isOver
+                    ? "Your actual screen usage averages ~\(String(format: "%.1f", actual)) hrs/day (\(diffFormatted) hrs higher than estimated). That extra screen exposure significantly accelerates tear evaporation and focus lock."
+                    : "Your actual screen usage averages ~\(String(format: "%.1f", actual)) hrs/day. You're already doing better than you thought!"
 
-            let note = isOver
-                ? "We've added extra blink pulses and midday neck resets to counteract this gap."
-                : "Your customized routine will keep this healthy habit sustained."
+                let note = isOver
+                    ? "We've added extra blink pulses and midday neck resets to counteract this gap."
+                    : "Your customized routine will keep this healthy habit sustained."
 
-            discrepancy = ScreenDiscrepancyInsight(
-                userEstimatedHours: screenHours,
-                actualHours: actual,
-                deltaHours: delta,
-                isSignificant: true,
-                message: msg,
-                recommendationNote: note
-            )
+                discrepancy = ScreenDiscrepancyInsight(
+                    userEstimatedHours: screenHours,
+                    actualHours: actual,
+                    deltaHours: delta,
+                    isSignificant: true,
+                    message: msg,
+                    recommendationNote: note
+                )
+            }
         }
 
         // 4. Headline & Primary Focus
@@ -136,7 +138,7 @@ public final class PersonalizationEngine {
             primaryFocus = "Accommodation & Depth Focus"
         }
 
-        let recommendedBlock = profile.peakFatigueTime.contains("Evening") ? "8:30 PM – 10:00 PM" : "2:00 PM – 3:30 PM"
+        let recommendedBlock = isLateOrEvening ? "8:30 PM – 10:00 PM" : "2:00 PM – 3:30 PM"
 
         return PersonalizedPlanBlueprint(
             headline: headline,

@@ -497,7 +497,7 @@ private struct GemDetailSheet: View {
 
 public struct ProfileView: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var supabase = SupabaseService.shared
+    @ObservedObject private var supabase = SupabaseService.shared
     @State private var scoreEngine = LucidScoreEngine.shared
 
     // Navigation & Sheet states
@@ -505,8 +505,8 @@ public struct ProfileView: View {
     @State private var selectedGem: GemMilestone? = nil
     
     // Loaded Stats
-    @State private var exercisesCompleted: Int = 0
-    @State private var dayStreak: Int = 1
+    @State private var exercisesCompleted: Int = StreakManager.shared.totalExercisesCompleted
+    @State private var dayStreak: Int = StreakManager.shared.currentStreak
     @State private var isLoading: Bool = true
     
     // Animation triggers
@@ -970,7 +970,7 @@ public struct ProfileView: View {
                                 .foregroundStyle(.white)
                         }
                         Spacer()
-                        Image(systemName: "laptopcomputer")
+                        Image(systemName: activityIcon(for: profile.primaryActivity))
                             .foregroundStyle(.white.opacity(0.3))
                             .font(.title3)
                     }
@@ -1023,7 +1023,7 @@ public struct ProfileView: View {
                 color: .teal
             )
 
-            if let peakTime = supabase.currentProfile?.peakFatigueTime {
+            if let peakTime = supabase.currentProfile?.peakFatigueTime, !peakTime.isEmpty {
                 Divider().background(.white.opacity(0.05)).padding(.horizontal, 18)
                 ScreenTimeRow(
                     label: "Peak Eye Strain",
@@ -1048,6 +1048,15 @@ public struct ProfileView: View {
     }
 
     // MARK: - Logic Helpers
+    private func activityIcon(for activity: String) -> String {
+        switch activity {
+        case "Coding & Reading": return "laptopcomputer"
+        case "Video & Gaming": return "play.tv.fill"
+        case "Office & Writing": return "doc.text.fill"
+        case "Social & Mobile": return "iphone"
+        default: return "laptopcomputer"
+        }
+    }
     private var unlockedCount: Int {
         gemCatalog.filter {
             $0.unlockCondition.isUnlocked(exercises: exercisesCompleted, streak: dayStreak, screenTimeSaved: timeSavedHours)
@@ -1055,8 +1064,9 @@ public struct ProfileView: View {
     }
 
     private func loadStats() {
-        exercisesCompleted = UserDefaults.standard.integer(forKey: "lucid_exercises_completed")
-        dayStreak = max(1, UserDefaults.standard.integer(forKey: "lucid_day_streak"))
+        StreakManager.shared.refreshStreakState()
+        exercisesCompleted = StreakManager.shared.totalExercisesCompleted
+        dayStreak = StreakManager.shared.currentStreak
         isLoading = false
 
         Task {
