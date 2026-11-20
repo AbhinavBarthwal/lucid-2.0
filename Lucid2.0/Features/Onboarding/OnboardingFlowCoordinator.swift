@@ -137,8 +137,7 @@ public struct OnboardingFlowCoordinator: View {
                         ScreenTimeStepView(
                             hours: $profile.estimatedDailyScreenTimeHours,
                             primaryActivity: $profile.primaryActivity,
-                            peakFatigueTime: $profile.peakFatigueTime,
-                            actualHours: $profile.actualDailyScreenTimeHours
+                            peakFatigueTime: $profile.peakFatigueTime
                         )
                         .padding(.horizontal, 24)
 

@@ -18,7 +18,32 @@ public final class TestScheduleManager {
     public var lastCompletedDate: Date?
 
     private let lastCompletedKey = "lucid_vision_tests_last_completed"
+    private let lastCTestScoreKey = "lucid_vision_tests_last_ctest_score"
+    private let lastOsdiScoreKey = "lucid_vision_tests_last_osdi_score"
     private let biweeklyIntervalDays: Int = 14
+
+    public var lastCTestScore: Double {
+        UserDefaults.standard.object(forKey: lastCTestScoreKey) as? Double ?? 6.0
+    }
+
+    public var lastOsdiScore: Double {
+        UserDefaults.standard.object(forKey: lastOsdiScoreKey) as? Double ?? 15.0
+    }
+
+    /// Records the result of a single test (Landolt-C or OSDI) and refreshes the biweekly due date,
+    /// reusing the other test's most recent score since the battery timer applies to both together.
+    public func completeTest(id: String, score: Double) {
+        switch id {
+        case "landolt_c":
+            UserDefaults.standard.set(score, forKey: lastCTestScoreKey)
+            completeTestBattery(cTestScore: score, osdiScore: lastOsdiScore)
+        case "osdi":
+            UserDefaults.standard.set(score, forKey: lastOsdiScoreKey)
+            completeTestBattery(cTestScore: lastCTestScore, osdiScore: score)
+        default:
+            break
+        }
+    }
 
     public init() {
         checkDueStatus()

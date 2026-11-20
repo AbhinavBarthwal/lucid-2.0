@@ -69,8 +69,8 @@ public struct SymptomLaymanInfo: Identifiable, Sendable {
             tagline: "Squinting or pain from bright screens and indoor glare",
             laymanDescription: "Your pupils and photoreceptors become hyper-sensitized when exposed to high-contrast white backgrounds in dimly lit rooms.",
             whyScreensCauseIt: "Extreme contrast ratios between screen brightness and surrounding room light overwhelm the pupillary reflex.",
-            howLucRelievesIt: "Palming dark-rest drills that give photoreceptors complete rest, plus ambient lighting calibration reminders.",
-            recommendedExerciseName: "Photoreceptor Dark Rest"
+            howLucRelievesIt: "Luc uses rhythmic blink training to rebuild a healthy tear layer and ease the pupillary strain that makes bright screens feel harsher.",
+            recommendedExerciseName: "Blink Training Routine"
         ),
         "Astigmatism": SymptomLaymanInfo(
             name: "Astigmatism",

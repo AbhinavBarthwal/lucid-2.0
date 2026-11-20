@@ -9,11 +9,13 @@ import SwiftUI
 
 public struct ScoreHeroView: View {
     @State private var floating = false
-    @State private var scoreEngine = LucidScoreEngine.shared
+    var scoreEngine: LucidScoreEngine = .shared
     @ScaledMetric(relativeTo: .largeTitle) private var scoreFontSize: CGFloat = 46
     private let characterImage = "Luc"
 
-    public init() {}
+    public init(scoreEngine: LucidScoreEngine = .shared) {
+        self.scoreEngine = scoreEngine
+    }
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -168,6 +170,35 @@ public struct ScoreChip: View {
             Text(title)
                 .font(Typography.callout(weight: .semibold))
                 .foregroundStyle(Color.white.opacity(0.6))
+        }
+    }
+}
+
+#Preview("Score Hero - Numbers (Exercise, Test, Rest)") {
+    ZStack {
+        Color.black.ignoresSafeArea()
+        ScoreHeroView(
+            scoreEngine: .preview(rest: 74, exercise: 68, test: 82, isCalibrated: true)
+        )
+    }
+}
+
+#Preview("Score Hero - Calibrating") {
+    ZStack {
+        Color.black.ignoresSafeArea()
+        ScoreHeroView(
+            scoreEngine: .preview(isCalibrated: false)
+        )
+    }
+}
+
+#Preview("Score Chips") {
+    ZStack {
+        Color.black.ignoresSafeArea()
+        HStack(spacing: 24) {
+            ScoreChip(icon: "dumbbell.fill", title: "Exercise", value: 68)
+            ScoreChip(icon: "list.clipboard", title: "Tests", value: 82)
+            ScoreChip(icon: "tree.fill", title: "Rest", value: 74)
         }
     }
 }

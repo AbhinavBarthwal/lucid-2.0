@@ -102,35 +102,7 @@ public struct PersonalizedPlanRevealView: View {
                 .padding(18)
                 .cardBackground(top: Palette.cardTop, bottom: Palette.cardBottom, corner: 22)
 
-                // 2. Discrepancy Insight Card (if present)
-                if let disc = blueprint.discrepancy {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "chart.xyaxis.line")
-                                .font(Typography.footnote(weight: .semibold))
-                                .foregroundStyle(Palette.amber)
-                            Text("Screen Time Insight")
-                                .font(Typography.footnote(weight: .bold, design: .rounded))
-                                .foregroundStyle(Palette.amber)
-                        }
-
-                        Text(disc.message)
-                            .font(Typography.subheadline())
-                            .foregroundStyle(Color.white.opacity(0.85))
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        Text(disc.recommendationNote)
-                            .font(Typography.caption())
-                            .foregroundStyle(Color.white.opacity(0.6))
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(18)
-                    .cardBackground(top: Color(red: 0.14, green: 0.18, blue: 0.30),
-                                    bottom: Color(red: 0.06, green: 0.08, blue: 0.15),
-                                    corner: 22)
-                }
-
-                // 3. Recommended Exercises Stack
+                // 2. Recommended Exercises Stack
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
                         Image(systemName: "dumbbell.fill")

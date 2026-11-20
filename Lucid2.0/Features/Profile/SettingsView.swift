@@ -16,7 +16,7 @@ public struct SettingsView: View {
     
     // Notification toggles
     @AppStorage("lucid_setting_daily_reminder") private var dailyReminderEnabled: Bool = true
-    @AppStorage("lucid_setting_screen_breaks") private var screenBreaksEnabled: Bool = true
+    @State private var screenBreaksEnabled: Bool = false
     @AppStorage("lucid_setting_streak_saver") private var streakSaverEnabled: Bool = true
     @AppStorage("lucid_setting_weekly_reports") private var weeklyReportsEnabled: Bool = true
     @AppStorage("lucid_setting_reminder_hour") private var reminderHour: Int = 10
@@ -131,6 +131,11 @@ public struct SettingsView: View {
         .onAppear {
             loadInitialSettings()
         }
+        .onChange(of: dailyReminderEnabled) { _, _ in NotificationEngine.shared.refreshAllSchedules() }
+        .onChange(of: streakSaverEnabled) { _, _ in NotificationEngine.shared.refreshAllSchedules() }
+        .onChange(of: weeklyReportsEnabled) { _, _ in NotificationEngine.shared.refreshAllSchedules() }
+        .onChange(of: reminderHour) { _, _ in NotificationEngine.shared.refreshAllSchedules() }
+        .onChange(of: reminderMinute) { _, _ in NotificationEngine.shared.refreshAllSchedules() }
     }
 
     // MARK: - Header Bar
@@ -362,6 +367,7 @@ public struct SettingsView: View {
                                 let granted = await NotificationSetupManager.shared.requestAuthorization()
                                 await MainActor.run {
                                     areSystemNotificationsEnabled = granted
+                                    NotificationEngine.shared.refreshAllSchedules()
                                 }
                             }
                         }
@@ -423,12 +429,12 @@ public struct SettingsView: View {
                 Divider().background(.white.opacity(0.08))
 
                 // Screen break prompt
-                Toggle(isOn: $screenBreaksEnabled) {
+                Toggle(isOn: screenBreaksToggleBinding) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("20-20-20 Screen Breaks")
                             .font(Typography.subheadline(weight: .semibold, design: .rounded))
                             .foregroundStyle(.white)
-                        Text("Micro-nudges to blink and relax accommodation")
+                        Text("Micro-nudges to blink and relax accommodation. Configure apps & interval in the Protect tab.")
                             .font(Typography.caption2(design: .rounded))
                             .foregroundStyle(.white.opacity(0.45))
                     }
@@ -475,6 +481,20 @@ public struct SettingsView: View {
                     }
             }
         }
+    }
+
+    private var screenBreaksToggleBinding: Binding<Bool> {
+        Binding(
+            get: { screenBreaksEnabled },
+            set: { newValue in
+                if newValue, ScreenTimeService.shared.hasScreenBreakSelection {
+                    ScreenTimeService.shared.enableScreenBreakMonitoringUsingStoredSelection()
+                } else if !newValue {
+                    ScreenTimeService.shared.stopScreenBreakMonitoring()
+                }
+                screenBreaksEnabled = ScreenTimeService.shared.isScreenBreakEnabled
+            }
+        )
     }
 
     // MARK: - Section 3: Shielding & Screen Time
@@ -649,6 +669,8 @@ public struct SettingsView: View {
                 areSystemNotificationsEnabled = enabled
             }
         }
+
+        screenBreaksEnabled = ScreenTimeService.shared.isScreenBreakEnabled
 
         if let current = supabase.currentProfile {
             nameInput = current.name

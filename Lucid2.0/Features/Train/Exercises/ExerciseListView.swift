@@ -16,34 +16,19 @@ public struct ExerciseListView: View {
     @State private var selectedExercise: ExerciseDefinition?
     @State private var selectedTest: TestDefinition?
     @State private var activeExercise: ExerciseDefinition?
+    @State private var activeTest: TestDefinition?
 
     public init() {}
 
     // MARK: - Computed
 
+    /// Today's remaining recommended exercises, sourced from `DailyExerciseScheduler`'s personalized
+    /// stack — the single source of truth for "what to recommend today" (previously this view derived
+    /// its own separate, disagreeing list from score thresholds).
     private var recommendedExercises: [ExerciseDefinition] {
-        let score = scoreEngine.overallScore
-        let slot = scheduler.currentSlot
-        var ids: [String] = []
-
-        if score < 60 {
-            ids = ["smooth_pursuits", "saccadic_jumps"]
-        } else if scoreEngine.testScore < 65 {
-            ids = ["blink_training", "near_far_focus"]
-        } else {
-            switch slot {
-            case .morning:
-                ids = ["smooth_pursuits", "blink_training"]
-            case .midday:
-                ids = ["neck_mobility", "near_far_focus"]
-            case .evening, .anytime:
-                ids = ["figure_8", "pencil_pushup"]
-            }
-        }
-
-        return ids.compactMap { id in
-            ExerciseDefinition.catalog.first { $0.id == id }
-        }
+        scheduler.currentStack.items
+            .filter { !$0.isCompleted }
+            .map(\.exercise)
     }
 
     public var body: some View {
@@ -171,7 +156,9 @@ public struct ExerciseListView: View {
                 test: test,
                 onStart: {
                     selectedTest = nil
-                    // Future: navigate into test session
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                        activeTest = test
+                    }
                 },
                 onDismiss: {
                     selectedTest = nil
@@ -180,6 +167,9 @@ public struct ExerciseListView: View {
             .presentationDetents([.large])
             .presentationDragIndicator(.hidden)
             .presentationBackground(Color(red: 0.05, green: 0.06, blue: 0.12))
+        }
+        .fullScreenCover(item: $activeTest) { test in
+            TestSessionView(mode: .single(test), onDismiss: { activeTest = nil })
         }
     }
 

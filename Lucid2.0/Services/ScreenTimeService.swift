@@ -16,6 +16,7 @@ public final class ScreenTimeService: @unchecked Sendable {
 
     private let center = DeviceActivityCenter()
     private let store = ManagedSettingsStore()
+    private let appGroupSuiteName = "group.com.lucid2.appgroup"
 
     private init() {}
 
@@ -45,20 +46,7 @@ public final class ScreenTimeService: @unchecked Sendable {
         #endif
     }
 
-    // MARK: - Screen Time Query / Baseline Calibration
-
-    /// Fetches verified daily device activity screen time once authorized through Apple's Screen Time / FamilyControls API.
-    /// Returns nil if authorization has not been granted, preventing unverified guesses.
-    public func fetchActualDailyScreenTime(estimated: Double) -> Double? {
-        guard isAuthorized else { return nil }
-
-        // Apple strictly protects raw user screen time metrics behind sandboxed extensions (DeviceActivityReport).
-        // When authorization is approved, calculate calibrated baseline exposure from device activity tracking.
-        let adjustment = estimated >= 6.0 ? 1.6 : 0.8
-        return round((estimated + adjustment) * 10) / 10
-    }
-
-    // MARK: - Schedule Monitoring
+    // MARK: - Schedule Monitoring (App Blocking)
 
     public func scheduleBlock(_ block: ScheduledBlock, selection: FamilyActivitySelection) {
         let activityName = DeviceActivityName("lucid.block.\(block.id.uuidString)")
@@ -142,6 +130,89 @@ public final class ScreenTimeService: @unchecked Sendable {
         } else {
             // Spans midnight (e.g. 23:00 to 02:00)
             return currentTotalMinutes >= fromTotalMinutes || currentTotalMinutes < toTotalMinutes
+        }
+    }
+
+    // MARK: - 20-20-20 Screen Break Monitoring (Usage Threshold)
+
+    public static let screenBreakActivityName = DeviceActivityName("lucid.screenbreak")
+    public static let screenBreakEventName = DeviceActivityEvent.Name("lucid.screenbreak.usageThreshold")
+
+    private static let screenBreakEnabledKey = "screenbreak_enabled"
+    private static let screenBreakIntervalKey = "screenbreak_interval_minutes"
+    private static let screenBreakSelectionKey = "screenbreak_selection"
+
+    private var appGroupDefaults: UserDefaults? {
+        UserDefaults(suiteName: appGroupSuiteName)
+    }
+
+    public var isScreenBreakEnabled: Bool {
+        appGroupDefaults?.bool(forKey: Self.screenBreakEnabledKey) ?? false
+    }
+
+    public var screenBreakIntervalMinutes: Int {
+        let value = appGroupDefaults?.integer(forKey: Self.screenBreakIntervalKey) ?? 0
+        return value > 0 ? value : 40
+    }
+
+    public func screenBreakSelection() -> FamilyActivitySelection? {
+        guard let data = appGroupDefaults?.data(forKey: Self.screenBreakSelectionKey) else { return nil }
+        return try? PropertyListDecoder().decode(FamilyActivitySelection.self, from: data)
+    }
+
+    public var hasScreenBreakSelection: Bool {
+        guard let selection = screenBreakSelection() else { return false }
+        return !selection.applicationTokens.isEmpty || !selection.categoryTokens.isEmpty
+            || !selection.applications.isEmpty || !selection.categories.isEmpty
+    }
+
+    /// Re-enables monitoring using whatever selection/interval was last configured in the Protect tab.
+    public func enableScreenBreakMonitoringUsingStoredSelection() {
+        guard let selection = screenBreakSelection() else { return }
+        startScreenBreakMonitoring(selection: selection, intervalMinutes: screenBreakIntervalMinutes)
+    }
+
+    /// Starts (or re-starts) usage-threshold monitoring for the 20-20-20 reminder.
+    /// Because DeviceActivity thresholds fire once per schedule occurrence, `LucidMonitorExtension`
+    /// re-arms this same monitor every time the threshold is reached, so the nudge effectively
+    /// repeats every `intervalMinutes` of cumulative usage until midnight resets the occurrence.
+    public func startScreenBreakMonitoring(selection: FamilyActivitySelection, intervalMinutes: Int) {
+        guard let defaults = appGroupDefaults else { return }
+
+        if let data = try? PropertyListEncoder().encode(selection) {
+            defaults.set(data, forKey: Self.screenBreakSelectionKey)
+        }
+        defaults.set(intervalMinutes, forKey: Self.screenBreakIntervalKey)
+        defaults.set(true, forKey: Self.screenBreakEnabledKey)
+
+        armScreenBreakMonitoring(selection: selection, intervalMinutes: intervalMinutes)
+    }
+
+    public func stopScreenBreakMonitoring() {
+        appGroupDefaults?.set(false, forKey: Self.screenBreakEnabledKey)
+        center.stopMonitoring([Self.screenBreakActivityName])
+    }
+
+    private func armScreenBreakMonitoring(selection: FamilyActivitySelection, intervalMinutes: Int) {
+        let schedule = DeviceActivitySchedule(
+            intervalStart: DateComponents(hour: 0, minute: 0),
+            intervalEnd: DateComponents(hour: 23, minute: 59),
+            repeats: true
+        )
+        let event = DeviceActivityEvent(
+            applications: selection.applicationTokens,
+            categories: selection.categoryTokens,
+            webDomains: selection.webDomainTokens,
+            threshold: DateComponents(minute: intervalMinutes)
+        )
+        do {
+            try center.startMonitoring(
+                Self.screenBreakActivityName,
+                during: schedule,
+                events: [Self.screenBreakEventName: event]
+            )
+        } catch {
+            print("[ScreenTimeService] Failed to arm screen break monitoring: \(error)")
         }
     }
 }

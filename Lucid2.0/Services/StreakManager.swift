@@ -216,6 +216,7 @@ public final class StreakManager {
         }
 
         saveStreakData()
+        NotificationEngine.shared.refreshAllSchedules()
     }
 
     // MARK: - Past 7 Days Status
@@ -248,5 +249,17 @@ public final class StreakManager {
         }
 
         return days
+    }
+
+    // MARK: - Testing & Preview Helpers
+
+    public func resetStreak() {
+        self.currentStreak = 0
+        self.bestStreak = 0
+        self.totalExercisesCompleted = 0
+        self.todayExercisesCompleted = 0
+        self.lastCompletedDate = nil
+        self.completedDates.removeAll()
+        saveStreakData()
     }
 }
