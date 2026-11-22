@@ -53,6 +53,14 @@ class BlinkTrainingViewController: UIViewController, ARSCNViewDelegate {
     private var isLeftEyeClosed = false
     private var isRightEyeClosed = false
     private let blinkThreshold: Float = 0.75
+
+    // A natural blink doesn't reopen both eyelids on the exact same ARKit frame.
+    // Instead of requiring exact-frame coincidence, we gather reopen events for a
+    // short window and resolve the attempt once it elapses.
+    private let blinkConfirmationWindow: TimeInterval = 0.15
+    private var pendingBlinkTimer: Timer?
+    private var leftReopenedPending = false
+    private var rightReopenedPending = false
     
     private var totalErrors = 0
     private var failedAttemptsForCurrentBlink = 0
@@ -119,6 +127,9 @@ class BlinkTrainingViewController: UIViewController, ARSCNViewDelegate {
         sceneView.session.pause()
         phaseTimer?.invalidate(); phaseTimer = nil
         responseTimer?.invalidate(); responseTimer = nil
+        pendingBlinkTimer?.invalidate(); pendingBlinkTimer = nil
+        leftReopenedPending = false
+        rightReopenedPending = false
         player?.pause()
         playerLayer?.removeFromSuperlayer(); playerLayer = nil
         sceneView.delegate = nil
@@ -417,6 +428,9 @@ class BlinkTrainingViewController: UIViewController, ARSCNViewDelegate {
         hideNudge()
         currentBlinkMaxLeft = 0.0
         currentBlinkMaxRight = 0.0
+        pendingBlinkTimer?.invalidate(); pendingBlinkTimer = nil
+        leftReopenedPending = false
+        rightReopenedPending = false
         
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
             guard let self = self, self.isExerciseActive else { return }
@@ -440,6 +454,9 @@ class BlinkTrainingViewController: UIViewController, ARSCNViewDelegate {
         isAcceptingInput = false
         responseTimer?.invalidate()
         phaseTimer?.invalidate()
+        pendingBlinkTimer?.invalidate(); pendingBlinkTimer = nil
+        leftReopenedPending = false
+        rightReopenedPending = false
         recordZeroMarksForSkippedSection()
         cueTime = nil
         failedAttemptsForCurrentBlink = 0
@@ -485,11 +502,20 @@ class BlinkTrainingViewController: UIViewController, ARSCNViewDelegate {
         }
     }
     
-    func renderer(_ renderer: SCNSceneRenderer, didUpdate node: SCNNode, for anchor: ARAnchor) {
-        guard isExerciseActive, let faceAnchor = anchor as? ARFaceAnchor, isAcceptingInput else { return }
-        
-        let realLeftValue = faceAnchor.blendShapes[.eyeBlinkRight]?.floatValue ?? 0.0
-        let realRightValue = faceAnchor.blendShapes[.eyeBlinkLeft]?.floatValue ?? 0.0
+    // ARSCNViewDelegate calls this from ARKit's internal render thread, not the main
+    // thread. Only the anchor/blend-shape read happens here; everything that touches
+    // view-controller state hops to the main actor first.
+    nonisolated func renderer(_ renderer: SCNSceneRenderer, didUpdate node: SCNNode, for anchor: ARAnchor) {
+        guard let faceAnchor = anchor as? ARFaceAnchor else { return }
+        let leftValue = faceAnchor.blendShapes[.eyeBlinkRight]?.floatValue ?? 0.0
+        let rightValue = faceAnchor.blendShapes[.eyeBlinkLeft]?.floatValue ?? 0.0
+        Task { @MainActor [weak self] in
+            self?.handleEyeBlendShapeUpdate(leftValue: leftValue, rightValue: rightValue)
+        }
+    }
+
+    private func handleEyeBlendShapeUpdate(leftValue realLeftValue: Float, rightValue realRightValue: Float) {
+        guard isExerciseActive, isAcceptingInput else { return }
         
         if realLeftValue > currentBlinkMaxLeft { currentBlinkMaxLeft = realLeftValue }
         if realRightValue > currentBlinkMaxRight { currentBlinkMaxRight = realRightValue }
@@ -500,12 +526,35 @@ class BlinkTrainingViewController: UIViewController, ARSCNViewDelegate {
         let leftOpened = isLeftEyeClosed && !leftClosedNow
         let rightOpened = isRightEyeClosed && !rightClosedNow
         
-        if leftOpened || rightOpened {
-            handleBlinkAttempt(left: leftOpened, right: rightOpened)
-        }
-        
         isLeftEyeClosed = leftClosedNow
         isRightEyeClosed = rightClosedNow
+        
+        guard leftOpened || rightOpened else { return }
+        
+        // A natural blink doesn't always reopen both eyelids on the exact same frame —
+        // wait a short confirmation window so a one-frame stagger still counts as one
+        // double-blink, and a genuine two-eye blink can't slip through a single-eye phase
+        // just because one eyelid happened to lift a beat before the other.
+        if leftOpened { leftReopenedPending = true }
+        if rightOpened { rightReopenedPending = true }
+        
+        pendingBlinkTimer?.invalidate()
+        pendingBlinkTimer = Timer.scheduledTimer(withTimeInterval: blinkConfirmationWindow, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.finalizePendingBlinkAttempt()
+            }
+        }
+    }
+    
+    private func finalizePendingBlinkAttempt() {
+        pendingBlinkTimer = nil
+        let left = leftReopenedPending
+        let right = rightReopenedPending
+        leftReopenedPending = false
+        rightReopenedPending = false
+        
+        guard isExerciseActive, isAcceptingInput, left || right else { return }
+        handleBlinkAttempt(left: left, right: right)
     }
     
     private func handleBlinkAttempt(left: Bool, right: Bool) {
@@ -558,9 +607,13 @@ class BlinkTrainingViewController: UIViewController, ARSCNViewDelegate {
             
             if self.consecutiveErrors >= 3 { self.showContextualNudge() }
             
+            // A string of failed attempts usually means the detector isn't reading this
+            // user's blink reliably right now (lighting, face angle, etc.) rather than
+            // the user genuinely failing 10 times in a row. Skip the section honestly —
+            // the same way a no-response timeout already does — instead of crediting a
+            // success the user never produced.
             if self.failedAttemptsForCurrentBlink >= 10 {
-                self.failedAttemptsForCurrentBlink = 0
-                self.processSuccess()
+                self.skipCurrentBlinkSectionDueToNoResponse()
             }
         }
     }
@@ -572,6 +625,7 @@ class BlinkTrainingViewController: UIViewController, ARSCNViewDelegate {
             cueTime = nil
         }
         responseTimer?.invalidate()
+        pendingBlinkTimer?.invalidate(); pendingBlinkTimer = nil
         isAcceptingInput = false
         hideNudge()
         

@@ -52,6 +52,18 @@ class SaccadicJumpsViewController: UIViewController, ARSessionDelegate {
     
     private let speedTiers: [Double] = [2.5 , 2.2 , 2.0 , 1.8]
 
+    // A hit must hold for several consecutive frames so a single noisy frame
+    // (e.g. lookAtPoint glitching during a blink) can't count as a correct look.
+    private let requiredConsecutiveHitFrames = 4
+    private var consecutiveHitFrames = 0
+    private let eyeClosedThreshold: Float = 0.7
+
+    // Thresholds are measured from the user's own resting gaze, sampled while they
+    // watch the 3-2-1 countdown, rather than from an assumed (0, 0) center.
+    private var isSamplingRestingGaze = false
+    private var restingGazeSamples: [SIMD2<Float>] = []
+    private var restingGaze = SIMD2<Float>(0, 0)
+
     // Video player properties
     private var videoPlayer: AVPlayer?
     private var videoContainerView: UIView?
@@ -234,8 +246,12 @@ class SaccadicJumpsViewController: UIViewController, ARSessionDelegate {
         guard isExerciseActive, !isTracking else { return }
         maximizeSystemVolume()
         InstructionTracker.markAsCompleted(for: "SaccadicJumps")
+        restingGazeSamples.removeAll()
+        isSamplingRestingGaze = true
         runStartCountdown { [weak self] in
             guard let self = self, self.isExerciseActive, !self.isTracking else { return }
+            self.isSamplingRestingGaze = false
+            self.restingGaze = RestingGaze.estimate(from: self.restingGazeSamples)
             self.startExercise()
         }
     }
@@ -438,27 +454,53 @@ class SaccadicJumpsViewController: UIViewController, ARSessionDelegate {
     }
 
     func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
-        guard isExerciseActive, isTracking, let faceAnchor = anchors.first as? ARFaceAnchor else { return }
-        let lookAt = faceAnchor.lookAtPoint
-        
-        let threshold: Float = 0.14
-        let bottomThreshold: Float = 0.05
+        guard let faceAnchor = anchors.compactMap({ $0 as? ARFaceAnchor }).first else { return }
+        let gaze = SIMD2<Float>(faceAnchor.lookAtPoint.x, faceAnchor.lookAtPoint.y)
+        let blinkLeft = faceAnchor.blendShapes[.eyeBlinkLeft]?.floatValue ?? 0
+        let blinkRight = faceAnchor.blendShapes[.eyeBlinkRight]?.floatValue ?? 0
+        let isReliable = faceAnchor.isTracked && max(blinkLeft, blinkRight) < eyeClosedThreshold
         
         DispatchQueue.main.async { [weak self] in
-            guard let self = self, self.isExerciseActive else { return }
-            guard let target = self.currentDirection, !self.hasLookedInDirection else { return }
-            
-            var success = false
-            switch target {
-            case .top:    success = lookAt.y > threshold
-            case .left:   success = lookAt.x < -threshold
-            case .right:  success = lookAt.x > threshold
-            case .bottom: success = lookAt.y < -bottomThreshold
-            }
-            
-            if success {
-                self.handleSuccessfulLook()
-            }
+            self?.processGazeSample(gaze, isReliable: isReliable)
+        }
+    }
+
+    private func processGazeSample(_ gaze: SIMD2<Float>, isReliable: Bool) {
+        guard isExerciseActive, isReliable else {
+            consecutiveHitFrames = 0
+            return
+        }
+        if isSamplingRestingGaze {
+            restingGazeSamples.append(gaze)
+            return
+        }
+        guard isTracking, let target = currentDirection, !hasLookedInDirection else {
+            consecutiveHitFrames = 0
+            return
+        }
+        
+        let threshold: Float = 0.14
+        // Looking down partially lowers the eyelids, which compresses lookAtPoint's
+        // downward range, so the bottom target needs a smaller excursion.
+        let bottomThreshold: Float = 0.05
+        let offset = gaze - restingGaze
+        
+        let isPastThreshold: Bool
+        switch target {
+        case .top:    isPastThreshold = offset.y > threshold
+        case .left:   isPastThreshold = offset.x < -threshold
+        case .right:  isPastThreshold = offset.x > threshold
+        case .bottom: isPastThreshold = offset.y < -bottomThreshold
+        }
+        
+        guard isPastThreshold else {
+            consecutiveHitFrames = 0
+            return
+        }
+        consecutiveHitFrames += 1
+        if consecutiveHitFrames >= requiredConsecutiveHitFrames {
+            consecutiveHitFrames = 0
+            handleSuccessfulLook()
         }
     }
     
@@ -511,6 +553,7 @@ class SaccadicJumpsViewController: UIViewController, ARSessionDelegate {
         
         repCount += 1
         hasLookedInDirection = false
+        consecutiveHitFrames = 0
         
         let nextDir = directionsPool.isEmpty ? (Direction.allCases.randomElement() ?? .top) : directionsPool.removeLast()
         currentDirection = nextDir

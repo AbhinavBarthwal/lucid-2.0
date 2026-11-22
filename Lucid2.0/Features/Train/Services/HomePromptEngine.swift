@@ -7,23 +7,12 @@
 
 import Foundation
 
-public final class IntelligencePromptEngine: @unchecked Sendable {
-    public static let shared = IntelligencePromptEngine()
+/// Generates the encouraging, contextual home-screen message based on score, time of day, and the
+/// next exercise. This is a plain template picker, not an AI/LLM call.
+public final class HomePromptEngine: @unchecked Sendable {
+    public static let shared = HomePromptEngine()
 
     private init() {}
-
-    /// Evaluates whether the current device supports on-device Apple Intelligence
-    public var hasAppleIntelligenceSupport: Bool {
-        #if targetEnvironment(simulator)
-        return false
-        #else
-        // Check for Apple Intelligence availability if running on supported A17 Pro/M-series chips
-        if #available(iOS 18.1, *) {
-            return false // Falls back safely to dynamic template engine
-        }
-        return false
-        #endif
-    }
 
     /// Generates an encouraging, plain layman prompt explaining what the score means and motivating action
     public func promptForToday(score: Int, slot: TimeOfDaySlot, nextExercise: ExerciseDefinition?) -> String {

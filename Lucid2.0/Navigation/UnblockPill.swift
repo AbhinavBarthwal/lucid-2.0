@@ -11,14 +11,18 @@ import Combine
 public struct UnblockPill: View {
     private static let defaultDuration: Int = 15 * 60 // 15 minutes
     private static let usedTodayKey = "unblock_pill_last_used_date"
+    private static let expiresAtKey = "unblock_pill_expires_at"
     private static let userDefaults = UserDefaults(suiteName: "group.com.lucid2.appgroup") ?? .standard
 
     public var viewModel: AppBlockingViewModel?
+
+    @AppStorage("lucid_setting_strict_mode") private var strictModeEnabled: Bool = false
 
     @State private var unblocked: Bool = false
     @State private var remaining: Int = UnblockPill.defaultDuration
     @State private var showHardModeAlert: Bool = false
     @State private var showUsedTodayAlert: Bool = false
+    @State private var showStrictHoldConfirm: Bool = false
 
     private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -99,6 +103,12 @@ public struct UnblockPill: View {
         } message: {
             Text("The 15-minute unblock can only be used once per day. It resets at midnight.")
         }
+        .sheet(isPresented: $showStrictHoldConfirm) {
+            strictHoldConfirmSheet
+                .presentationDetents([.height(220)])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(Color(red: 0.05, green: 0.06, blue: 0.12))
+        }
         .onReceive(ticker) { _ in
             guard unblocked else { return }
             if remaining > 0 {
@@ -106,6 +116,27 @@ public struct UnblockPill: View {
             } else {
                 endUnblock()
             }
+        }
+        .onAppear {
+            restoreUnblockStateIfNeeded()
+        }
+    }
+
+    /// Resumes (or self-heals) the unblock window after the app relaunches. The countdown only
+    /// lives in `@State`, so without this, killing the app mid-unblock previously left the shield
+    /// cleared indefinitely — the UI would just reset to "locked" while the real block stayed off.
+    private func restoreUnblockStateIfNeeded() {
+        guard let expiresAt = UnblockPill.userDefaults.object(forKey: UnblockPill.expiresAtKey) as? Date else { return }
+
+        let secondsLeft = Int(expiresAt.timeIntervalSinceNow)
+        if secondsLeft > 0 {
+            // Still within the window — resume the countdown, shield is already cleared.
+            remaining = secondsLeft
+            unblocked = true
+        } else {
+            // The window elapsed while the app wasn't running to tick it down — re-apply the
+            // shield now instead of leaving it cleared until the next scheduled boundary.
+            endUnblock()
         }
     }
 
@@ -126,19 +157,51 @@ public struct UnblockPill: View {
                 return
             }
 
-            // Record usage date before starting the unblock
-            UnblockPill.userDefaults.set(Date(), forKey: UnblockPill.usedTodayKey)
-
-            // Start 15 min unblock
-            remaining = UnblockPill.defaultDuration
-            unblocked = true
-            ScreenTimeService.shared.clearShield()
+            if strictModeEnabled {
+                showStrictHoldConfirm = true
+            } else {
+                performUnblock()
+            }
         }
+    }
+
+    private func performUnblock() {
+        // Record usage date before starting the unblock
+        UnblockPill.userDefaults.set(Date(), forKey: UnblockPill.usedTodayKey)
+
+        // Start 15 min unblock, persisting the expiry so the window survives an app relaunch
+        remaining = UnblockPill.defaultDuration
+        unblocked = true
+        UnblockPill.userDefaults.set(Date().addingTimeInterval(TimeInterval(UnblockPill.defaultDuration)), forKey: UnblockPill.expiresAtKey)
+        ScreenTimeService.shared.clearShield()
+    }
+
+    private var strictHoldConfirmSheet: some View {
+        VStack(spacing: 18) {
+            VStack(spacing: 6) {
+                Text("Strict Shielding is On")
+                    .font(Typography.headline(weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                Text("Hold for 5 seconds to confirm you really want to unblock.")
+                    .font(Typography.subheadline())
+                    .foregroundStyle(Color.white.opacity(0.65))
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.top, 8)
+
+            HoldToCommitButton(title: "Hold to Unblock", holdDuration: 5.0) {
+                showStrictHoldConfirm = false
+                performUnblock()
+            }
+            .padding(.horizontal, 24)
+        }
+        .padding(.bottom, 20)
     }
 
     private func endUnblock() {
         unblocked = false
         remaining = UnblockPill.defaultDuration
+        UnblockPill.userDefaults.removeObject(forKey: UnblockPill.expiresAtKey)
         // If an active block exists, re-apply shield
         if let block = viewModel?.primaryBlock,
            viewModel?.isBlockActiveNow(block) == true,

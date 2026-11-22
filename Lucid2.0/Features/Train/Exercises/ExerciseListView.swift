@@ -2,8 +2,8 @@
 //  ExerciseListView.swift
 //  Lucid2.0
 //
-//  Main scrollable view for the Train tab.
-//  Sections: Recommended → Eye Exercises → Neck → Vision Tests
+//  Main scrollable view for the Train tab, laid out Apple-Music-style:
+//  Today (hero) → Up Next → Eye Exercises → Neck Exercises → Vision Tests
 //
 
 import SwiftUI
@@ -16,52 +16,60 @@ public struct ExerciseListView: View {
     @State private var selectedExercise: ExerciseDefinition?
     @State private var selectedTest: TestDefinition?
     @State private var activeExercise: ExerciseDefinition?
+    @State private var activeTest: TestDefinition?
 
     public init() {}
 
     // MARK: - Computed
 
-    private var recommendedExercises: [ExerciseDefinition] {
-        let score = scoreEngine.overallScore
-        let slot = scheduler.currentSlot
-        var ids: [String] = []
+    /// The single next exercise in today's personalized stack — the Apple-Music-style "Today" hero pick.
+    private var todayExercise: ExerciseDefinition? {
+        scheduler.currentStack.currentExercise
+    }
 
-        if score < 60 {
-            ids = ["smooth_pursuits", "saccadic_jumps"]
-        } else if scoreEngine.testScore < 65 {
-            ids = ["blink_training", "near_far_focus"]
-        } else {
-            switch slot {
-            case .morning:
-                ids = ["smooth_pursuits", "blink_training"]
-            case .midday:
-                ids = ["neck_mobility", "near_far_focus"]
-            case .evening, .anytime:
-                ids = ["figure_8", "pencil_pushup"]
-            }
-        }
+    /// Everything left in today's stack after the hero pick.
+    private var upNextExercises: [ExerciseDefinition] {
+        let items = scheduler.currentStack.items
+        let index = scheduler.currentStack.currentIndex
+        guard index < items.count else { return [] }
+        return items[(index + 1)...].map(\.exercise)
+    }
 
-        return ids.compactMap { id in
-            ExerciseDefinition.catalog.first { $0.id == id }
-        }
+    /// Ids of exercises in today's personalized plan, used to highlight them wherever they appear.
+    private var personalizedIds: Set<String> {
+        Set(scheduler.currentStack.items.map(\.exercise.id))
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            // MARK: - Recommended Section
-            if !recommendedExercises.isEmpty {
-                SectionHeader(
-                    icon: "star.fill",
-                    title: "Recommended",
-                    subtitle: "Tailored to your score today"
-                )
+        VStack(alignment: .leading, spacing: 22) {
+            // MARK: - Today (Hero)
+            if let today = todayExercise {
+                VStack(alignment: .leading, spacing: 14) {
+                    SectionHeader(icon: "star.fill", title: "Today", subtitle: "Tailored to your plan")
 
-                VStack(spacing: 10) {
-                    ForEach(recommendedExercises) { exercise in
-                        RecommendedExerciseCard(exercise: exercise) {
-                            selectedExercise = exercise
+                    TodayHeroCard(
+                        exercise: today,
+                        onStart: { activeExercise = today },
+                        onInfo: { selectedExercise = today }
+                    )
+                    .padding(.horizontal, 22)
+                }
+            }
+
+            // MARK: - Up Next
+            if !upNextExercises.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    SectionHeader(icon: "list.bullet", title: "Up Next", subtitle: "\(upNextExercises.count) more today")
+
+                    VStack(spacing: 10) {
+                        ForEach(upNextExercises) { exercise in
+                            RecommendedExerciseCard(
+                                exercise: exercise,
+                                onTap: { activeExercise = exercise },
+                                onInfo: { selectedExercise = exercise }
+                            )
+                            .padding(.horizontal, 22)
                         }
-                        .padding(.horizontal, 22)
                     }
                 }
 
@@ -75,15 +83,18 @@ public struct ExerciseListView: View {
             SectionHeader(
                 icon: "eye.fill",
                 title: "Eye Exercises",
-                subtitle: ""
+                subtitle: "\(ExerciseDefinition.eyeExercises.count) exercises"
             )
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(ExerciseDefinition.eyeExercises) { exercise in
-                        ExerciseCard(exercise: exercise) {
-                            selectedExercise = exercise
-                        }
+                        ExerciseCard(
+                            exercise: exercise,
+                            isRecommended: personalizedIds.contains(exercise.id),
+                            onTap: { activeExercise = exercise },
+                            onInfo: { selectedExercise = exercise }
+                        )
                     }
                 }
                 .padding(.horizontal, 22)
@@ -94,15 +105,18 @@ public struct ExerciseListView: View {
             SectionHeader(
                 icon: "figure.walk",
                 title: "Neck Exercises",
-                subtitle: ""
+                subtitle: "\(ExerciseDefinition.neckExercises.count) exercises"
             )
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(ExerciseDefinition.neckExercises) { exercise in
-                        ExerciseCard(exercise: exercise) {
-                            selectedExercise = exercise
-                        }
+                        ExerciseCard(
+                            exercise: exercise,
+                            isRecommended: personalizedIds.contains(exercise.id),
+                            onTap: { activeExercise = exercise },
+                            onInfo: { selectedExercise = exercise }
+                        )
                     }
                 }
                 .padding(.horizontal, 22)
@@ -117,7 +131,7 @@ public struct ExerciseListView: View {
             SectionHeader(
                 icon: "waveform.path.ecg",
                 title: "Vision Tests",
-                subtitle: ""
+                subtitle: "\(TestDefinition.catalog.count) tests"
             )
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -135,7 +149,7 @@ public struct ExerciseListView: View {
             // Bottom safe-area padding for tab bar
             Color.clear.frame(height: 130)
         }
-        // Exercise detail sheet
+        // Exercise detail sheet — reached only via the explicit info (ⓘ) affordance on a card
         .sheet(item: $selectedExercise) { exercise in
             ExerciseDetailSheet(
                 exercise: exercise,
@@ -171,7 +185,9 @@ public struct ExerciseListView: View {
                 test: test,
                 onStart: {
                     selectedTest = nil
-                    // Future: navigate into test session
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                        activeTest = test
+                    }
                 },
                 onDismiss: {
                     selectedTest = nil
@@ -180,6 +196,9 @@ public struct ExerciseListView: View {
             .presentationDetents([.large])
             .presentationDragIndicator(.hidden)
             .presentationBackground(Color(red: 0.05, green: 0.06, blue: 0.12))
+        }
+        .fullScreenCover(item: $activeTest) { test in
+            TestSessionView(mode: .single(test), onDismiss: { activeTest = nil })
         }
     }
 

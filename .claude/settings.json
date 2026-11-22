@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__xcode-tools__XcodeRead",
+      "mcp__xcode-tools__XcodeGrep",
+      "mcp__xcode-tools__XcodeListNavigatorIssues"
+    ]
+  }
+}

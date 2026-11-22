@@ -40,6 +40,20 @@ class PencilPushUpViewController: UIViewController, ARSessionDelegate {
     
     private var isLookingAtScreen = false
     private var currentFaceDistance: Float = 0.0
+    private var lastFaceSeen: Date?
+    private var isFaceVisible: Bool {
+        lastFaceSeen.map { Date().timeIntervalSince($0) < 0.5 } ?? false
+    }
+
+    // Closing one eye removes the need to converge, so a rep only counts with both open.
+    private var areBothEyesOpen = false
+    private let eyeClosedThreshold: Float = 0.6
+
+    // Vergence = angle between the two eyes' gaze directions. Focusing at ~20 cm
+    // geometrically needs ~17°; the threshold is deliberately lenient because
+    // ARKit's per-eye estimates are noisy.
+    private var recentVergenceDegrees: [Float] = []
+    private let minVergenceDegreesAtNearPoint: Float = 6.0
     private var sessionStartTime: Date?
     private var gazeTimer: Timer?
     
@@ -568,7 +582,9 @@ class PencilPushUpViewController: UIViewController, ARSessionDelegate {
 
     private func checkDistanceGoal() {
         if currentPhase == .bringingCloser {
-            if currentFaceDistance > 0 && currentFaceDistance <= 0.21 && isLookingAtScreen {
+            if isFaceVisible && areBothEyesOpen && isLookingAtScreen
+                && currentFaceDistance > 0 && currentFaceDistance <= 0.21 {
+                recordConvergenceForCompletedRep()
                 handleFullRepCompletion()
             }
         } else if currentPhase == .waitingForReset {
@@ -579,14 +595,46 @@ class PencilPushUpViewController: UIViewController, ARSessionDelegate {
         }
     }
 
+    /// A rep that reaches the near point without the eyes converging still completes
+    /// (so a noisy ARKit reading can't trap the user), but counts against accuracy.
+    private func recordConvergenceForCompletedRep() {
+        guard !recentVergenceDegrees.isEmpty else { return }
+        let average = recentVergenceDegrees.reduce(0, +) / Float(recentVergenceDegrees.count)
+        totalFramesChecked += 1
+        if average < minVergenceDegreesAtNearPoint {
+            totalErrors += 1
+        }
+    }
+
     func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
-        guard isExerciseActive, let faceAnchor = anchors.compactMap({ $0 as? ARFaceAnchor }).first else {
+        guard isExerciseActive,
+              let faceAnchor = anchors.compactMap({ $0 as? ARFaceAnchor }).first,
+              faceAnchor.isTracked else {
             isLookingAtScreen = false
+            areBothEyesOpen = false
+            if isExerciseActive && currentPhase != .none {
+                distanceLabel.text = "-- cm"
+            }
             return
         }
+        lastFaceSeen = Date()
         
         let lookAt = faceAnchor.lookAtPoint
         isLookingAtScreen = abs(lookAt.x) < 0.2 && abs(lookAt.y) < 0.2
+
+        let blinkLeft = faceAnchor.blendShapes[.eyeBlinkLeft]?.floatValue ?? 0
+        let blinkRight = faceAnchor.blendShapes[.eyeBlinkRight]?.floatValue ?? 0
+        areBothEyesOpen = max(blinkLeft, blinkRight) < eyeClosedThreshold
+
+        let leftGaze = simd_normalize(SIMD3<Float>(faceAnchor.leftEyeTransform.columns.2.x,
+                                                   faceAnchor.leftEyeTransform.columns.2.y,
+                                                   faceAnchor.leftEyeTransform.columns.2.z))
+        let rightGaze = simd_normalize(SIMD3<Float>(faceAnchor.rightEyeTransform.columns.2.x,
+                                                    faceAnchor.rightEyeTransform.columns.2.y,
+                                                    faceAnchor.rightEyeTransform.columns.2.z))
+        let vergence = acos(min(1, max(-1, simd_dot(leftGaze, rightGaze)))) * 180 / .pi
+        recentVergenceDegrees.append(vergence)
+        if recentVergenceDegrees.count > 10 { recentVergenceDegrees.removeFirst() }
         
         let transform = faceAnchor.transform
         let distance = sqrt(pow(transform.columns.3.x, 2) + pow(transform.columns.3.y, 2) + pow(transform.columns.3.z, 2))
@@ -642,16 +690,27 @@ class PencilPushUpViewController: UIViewController, ARSessionDelegate {
             Task { @MainActor in
                 guard self.isExerciseActive, self.currentPhase == .bringingCloser else { return }
                 self.totalFramesChecked += 1
-                if self.isLookingAtScreen {
-                    if self.instructionLabel.text != "Bring your phone closer" {
-                        UIView.animate(withDuration: 0.3) { self.instructionLabel.alpha = 0 }
-                    }
+
+                let problem: String?
+                if !self.isFaceVisible {
+                    problem = "Keep your face in view of the camera"
+                } else if !self.areBothEyesOpen {
+                    problem = "Keep both eyes open"
+                } else if !self.isLookingAtScreen {
+                    problem = "Please look at the green dot at the top of the display"
                 } else {
+                    problem = nil
+                }
+
+                if let problem {
                     self.totalErrors += 1
                     Vibrator.playError()
                     self.instructionLabel.textColor = .systemRed
-                    self.instructionLabel.text = "Please look at the green dot at the top of the display"
+                    self.instructionLabel.text = problem
                     self.instructionLabel.alpha = 1
+                } else if self.instructionLabel.textColor == .systemRed {
+                    self.instructionLabel.textColor = .lightGray
+                    self.instructionLabel.text = "Bring your phone closer"
                 }
             }
         }

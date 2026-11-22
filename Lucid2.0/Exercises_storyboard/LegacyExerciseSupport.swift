@@ -20,11 +20,25 @@ extension UIColor {
     }
 }
 
+// MARK: - Resting Gaze
+public enum RestingGaze {
+    /// Component-wise median of `lookAtPoint` samples taken while the user looks at screen center.
+    /// Falls back to zero when there's too little data or the estimate is implausibly far off-center.
+    public static func estimate(from samples: [SIMD2<Float>]) -> SIMD2<Float> {
+        guard samples.count >= 10 else { return .zero }
+        let xs = samples.map(\.x).sorted()
+        let ys = samples.map(\.y).sorted()
+        let median = SIMD2<Float>(xs[xs.count / 2], ys[ys.count / 2])
+        guard abs(median.x) < 0.15, abs(median.y) < 0.15 else { return .zero }
+        return median
+    }
+}
+
 // MARK: - Instruction Tracker
 public struct InstructionTracker {
     public static var firstRunStatus: [String: Int] = {
         var status: [String: Int] = [:]
-        let keys = ["PencilPushup", "SaccadicJumps", "SmoothPursuits", "PeripheralAwareness", "Figure8", "NearFar", "Blink", "CTest", "OSDI"]
+        let keys = ["PencilPushup", "SaccadicJumps", "SmoothPursuits", "Figure8", "NearFar", "Blink", "CTest", "OSDI"]
         for key in keys {
             if let savedValue = UserDefaults.standard.object(forKey: "InstructionFirstRun_\(key)") as? Int {
                 status[key] = savedValue
@@ -167,7 +181,7 @@ public final class ExerciseSession: Codable {
     public var startingDate: Date
     public var startingTime: Date
     public var endingTime: Date
-    public var type: String // "Blink", "PencilPushup", "SmoothPursuit", "Figure8", "NearFar", "SaccadicJumps", "PeripheralAwareness"
+    public var type: String // "Blink", "PencilPushup", "SmoothPursuit", "Figure8", "NearFar", "SaccadicJumps"
     public var durationSeconds: Int
     
     public var accuracyScore: Int?

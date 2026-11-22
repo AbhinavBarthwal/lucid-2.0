@@ -142,7 +142,7 @@ public struct ExerciseDefinition: Identifiable, Hashable, Codable, Sendable {
         idealTimeSlot: .midday,
         systemIcon: "viewfinder",
         imageName: "exercise_near_far_focus",
-        requiresCamera: false,
+        requiresCamera: true,
         recommendationReason: "Alternating focus relieves eye fatigue from screens"
     )
 
@@ -170,7 +170,7 @@ public struct ExerciseDefinition: Identifiable, Hashable, Codable, Sendable {
         idealTimeSlot: .evening,
         systemIcon: "arrow.up.and.down.and.sparkles",
         imageName: "exercise_pencil_pushup",
-        requiresCamera: false,
+        requiresCamera: true,
         recommendationReason: "Strengthens eye convergence and sharpens near focus"
     )
 

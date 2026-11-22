@@ -6,9 +6,14 @@
 //  and bridges their lifecycle and completion events to SwiftUI.
 //  Presents an animated shade reveal transition on entry.
 //
+//  Camera authorization is gated here rather than by each caller, so every
+//  entry point (Home card, Train list, detail sheet) shares one check and
+//  can't independently forget it.
+//
 
 import SwiftUI
 import UIKit
+import AVFoundation
 
 public struct ExerciseSessionView: View {
     public let exercise: ExerciseDefinition
@@ -18,6 +23,8 @@ public struct ExerciseSessionView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var hasTriggeredCompletion = false
     @State private var showShadeReveal = true
+    @State private var cameraPermissionGranted = false
+    @State private var showCameraDeniedAlert = false
 
     public init(
         exercise: ExerciseDefinition,
@@ -33,58 +40,106 @@ public struct ExerciseSessionView: View {
         ZStack(alignment: .topTrailing) {
             Color.black.ignoresSafeArea()
 
-            LegacyExerciseRepresentable(
-                exercise: exercise,
-                onCompleted: {
-                    guard !hasTriggeredCompletion else { return }
-                    hasTriggeredCompletion = true
-                    onCompleted()
-                },
-                onDismiss: {
-                    onDismiss()
-                }
-            )
-            .ignoresSafeArea()
-
-            // Close / Exit button overlay
-            Button {
-                onDismiss()
-                dismiss()
-            } label: {
-                ZStack {
-                    Circle()
-                        .fill(Color.black.opacity(0.45))
-                        .glassEffect(.clear, in: .circle)
-                        .overlay(Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.8))
-                        .frame(width: 36, height: 36)
-                    Image(systemName: "xmark")
-                        .font(Typography.subheadline(weight: .bold))
-                        .foregroundStyle(.white)
-                }
-                .padding(16)
-            }
-            .buttonStyle(.plain)
-
-            // Animated shade rolling up / revealing the session
-            if showShadeReveal {
-                ExerciseShadeTransitionView(
+            if cameraPermissionGranted {
+                LegacyExerciseRepresentable(
                     exercise: exercise,
-                    mode: .reveal,
-                    onRevealed: {
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            showShadeReveal = false
-                        }
+                    onCompleted: {
+                        guard !hasTriggeredCompletion else { return }
+                        hasTriggeredCompletion = true
+                        onCompleted()
+                    },
+                    onDismiss: {
+                        onDismiss()
                     }
                 )
-                .transition(.opacity)
-                .zIndex(100)
+                .ignoresSafeArea()
+
+                // Close / Exit button overlay
+                Button {
+                    onDismiss()
+                    dismiss()
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(Color.black.opacity(0.45))
+                            .glassEffect(.clear, in: .circle)
+                            .overlay(Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.8))
+                            .frame(width: 36, height: 36)
+                        Image(systemName: "xmark")
+                            .font(Typography.subheadline(weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+                    .padding(16)
+                }
+                .buttonStyle(.plain)
+
+                // Animated shade rolling up / revealing the session
+                if showShadeReveal {
+                    ExerciseShadeTransitionView(
+                        exercise: exercise,
+                        mode: .reveal,
+                        onRevealed: {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                showShadeReveal = false
+                            }
+                        }
+                    )
+                    .transition(.opacity)
+                    .zIndex(100)
+                }
             }
+        }
+        .task {
+            await requestCameraAccessIfNeeded()
         }
         .onReceive(NotificationCenter.default.publisher(for: .legacyExerciseDidComplete)) { _ in
             guard !hasTriggeredCompletion else { return }
             hasTriggeredCompletion = true
             onCompleted()
             dismiss()
+        }
+        .alert("Camera Access Required", isPresented: $showCameraDeniedAlert) {
+            Button("Open Settings") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+                onDismiss()
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) {
+                onDismiss()
+                dismiss()
+            }
+        } message: {
+            Text("This exercise uses the front camera for real-time eye tracking. Please enable Camera access in Settings to continue.")
+        }
+    }
+
+    @MainActor
+    private func requestCameraAccessIfNeeded() async {
+        guard exercise.requiresCamera else {
+            cameraPermissionGranted = true
+            return
+        }
+
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            cameraPermissionGranted = true
+        case .notDetermined:
+            let granted = await withCheckedContinuation { continuation in
+                AVCaptureDevice.requestAccess(for: .video) { granted in
+                    continuation.resume(returning: granted)
+                }
+            }
+            if granted {
+                cameraPermissionGranted = true
+            } else {
+                showCameraDeniedAlert = true
+            }
+        case .denied, .restricted:
+            showCameraDeniedAlert = true
+        @unknown default:
+            showCameraDeniedAlert = true
         }
     }
 }
@@ -129,12 +184,6 @@ private struct LegacyExerciseRepresentable: UIViewControllerRepresentable {
                 return vc
             }
             return UIStoryboard(name: "PencilPushUp", bundle: nil).instantiateViewController(withIdentifier: "PencilPushUpVC")
-
-        case "peripheral_awareness":
-            if let vc = UIStoryboard(name: "PeripheralAwareness", bundle: nil).instantiateInitialViewController() {
-                return vc
-            }
-            return UIStoryboard(name: "PeripheralAwareness", bundle: nil).instantiateViewController(withIdentifier: "PeripheralVC")
 
         case "blink_training":
             if let vc = UIStoryboard(name: "BlinkTraining", bundle: nil).instantiateInitialViewController() {

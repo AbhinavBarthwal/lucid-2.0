@@ -8,7 +8,6 @@
 //
 
 import SwiftUI
-import AVFoundation
 import UIKit
 
 public struct ExerciseDetailSheet: View {
@@ -17,8 +16,6 @@ public struct ExerciseDetailSheet: View {
     public var onDismiss: () -> Void
 
     @State private var isFirstRun: Bool
-    @State private var showCameraAlert = false
-    @State private var showSettingsAlert = false
     @State private var hasShownInstructions = false
     @State private var isStartingShade = false
 
@@ -220,16 +217,6 @@ public struct ExerciseDetailSheet: View {
                 .zIndex(100)
             }
         }
-        .alert("Camera Access Required", isPresented: $showCameraAlert) {
-            Button("Open Settings") {
-                if let url = URL(string: UIApplication.openSettingsURLString) {
-                    UIApplication.shared.open(url)
-                }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This exercise uses the front camera for real-time eye tracking. Please enable Camera access in Settings to continue.")
-        }
     }
 
     // MARK: - Helpers
@@ -265,37 +252,11 @@ public struct ExerciseDetailSheet: View {
     }
 
     private func handleStartExercise() {
-        let launch = {
-            ExerciseInstructionTracker.shared.markSeen(for: exercise.id)
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                isStartingShade = true
-            }
-        }
-
-        if exercise.requiresCamera {
-            checkCameraPermission { granted in
-                if granted {
-                    launch()
-                }
-            }
-        } else {
-            launch()
-        }
-    }
-
-    private func checkCameraPermission(completion: @escaping (Bool) -> Void) {
-        switch AVCaptureDevice.authorizationStatus(for: .video) {
-        case .authorized:
-            completion(true)
-        case .notDetermined:
-            AVCaptureDevice.requestAccess(for: .video) { granted in
-                DispatchQueue.main.async { completion(granted) }
-            }
-        case .denied, .restricted:
-            showCameraAlert = true
-            completion(false)
-        @unknown default:
-            completion(false)
+        // Camera authorization (when required) is gated centrally in ExerciseSessionView,
+        // so every entry point shares one check instead of each caller duplicating it.
+        ExerciseInstructionTracker.shared.markSeen(for: exercise.id)
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+            isStartingShade = true
         }
     }
 }

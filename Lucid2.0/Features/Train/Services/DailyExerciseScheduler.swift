@@ -8,6 +8,7 @@
 import Foundation
 import SwiftUI
 
+@MainActor
 @Observable
 public final class DailyExerciseScheduler {
     public static let shared = DailyExerciseScheduler()
@@ -48,34 +49,48 @@ public final class DailyExerciseScheduler {
             }
         }
 
-        // Generate fresh stack for today based on current time slot
-        self.currentStack = generateStackForCurrentTime()
+        // Generate fresh stack for today based on the user's personalized plan
+        self.currentStack = generatePersonalizedStack()
         persistStack()
     }
 
-    private func generateStackForCurrentTime() -> DailyExerciseStack {
-        var exercises: [ExerciseDefinition] = []
-
-        switch currentSlot {
-        case .morning:
-            exercises = [
-                .smoothPursuits,
-                .blinkTraining
-            ]
-        case .midday:
-            exercises = [
-                .neckMobility,
-                .nearFarFocus
-            ]
-        case .evening, .anytime:
-            exercises = [
-                .figure8,
-                .pencilPushup
-            ]
+    /// Builds today's stack from the user's onboarding-derived exercise list (`UserProfile.recommendedExerciseIds`),
+    /// ordered so exercises matching the current time-of-day slot surface first. Falls back to a generic
+    /// time-of-day default only when no personalization exists yet (e.g. onboarding hasn't run).
+    private func generatePersonalizedStack() -> DailyExerciseStack {
+        let profile = SupabaseService.shared.currentProfile ?? SupabaseService.shared.loadLocalProfile()
+        let personalizedExercises = (profile?.recommendedExerciseIds ?? []).compactMap { id in
+            ExerciseDefinition.catalog.first { $0.id == id }
         }
+
+        let exercises = personalizedExercises.isEmpty
+            ? defaultExercises(for: currentSlot)
+            : orderedForCurrentSlot(personalizedExercises)
 
         let items = exercises.map { DailyExerciseItem(exercise: $0) }
         return DailyExerciseStack(date: Date(), items: items)
+    }
+
+    /// Surfaces exercises matching the current time slot (or marked `.anytime`) first, without dropping
+    /// any personalized exercise that doesn't match the slot right now.
+    private func orderedForCurrentSlot(_ exercises: [ExerciseDefinition]) -> [ExerciseDefinition] {
+        let slot = currentSlot
+        return exercises.sorted { lhs, rhs in
+            let lhsMatches = lhs.idealTimeSlot == slot || lhs.idealTimeSlot == .anytime
+            let rhsMatches = rhs.idealTimeSlot == slot || rhs.idealTimeSlot == .anytime
+            return lhsMatches && !rhsMatches
+        }
+    }
+
+    private func defaultExercises(for slot: TimeOfDaySlot) -> [ExerciseDefinition] {
+        switch slot {
+        case .morning:
+            return [.smoothPursuits, .blinkTraining]
+        case .midday:
+            return [.neckMobility, .nearFarFocus]
+        case .evening, .anytime:
+            return [.figure8, .pencilPushup]
+        }
     }
 
     private func persistStack() {
@@ -103,7 +118,7 @@ public final class DailyExerciseScheduler {
     }
 
     public func resetDailyStack() {
-        self.currentStack = generateStackForCurrentTime()
+        self.currentStack = generatePersonalizedStack()
         persistStack()
     }
 }

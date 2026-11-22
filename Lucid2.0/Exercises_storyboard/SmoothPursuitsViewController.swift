@@ -18,7 +18,6 @@ class SmoothPursuitsViewController: UIViewController, ARSessionDelegate {
     @IBOutlet private weak var circleView: UIView!
 
     private let arSession = ARSession()
-    private var isLookingAtScreen = false
     private let errorHapticGenerator = UINotificationFeedbackGenerator()
     private let successHapticGenerator = UINotificationFeedbackGenerator()
     private var isExerciseActive = true
@@ -46,6 +45,26 @@ class SmoothPursuitsViewController: UIViewController, ARSessionDelegate {
     private var directionChecks: [String: Int] = [:]
     private var directionFails: [String: Int] = [:]
     private var headMovementSamples: [Float] = []
+
+    // Latest gaze reading from ARKit; scored against the dot's live position.
+    private var latestGaze: SIMD2<Float>?
+    private var latestGazeTime: Date?
+    private var latestEyesClosed = false
+    private let eyeClosedThreshold: Float = 0.7
+    private let staleGazeInterval: TimeInterval = 0.5
+
+    // Gaze is measured from the user's own resting gaze, sampled during the 3-2-1 countdown.
+    private var isSamplingRestingGaze = false
+    private var restingGazeSamples: [SIMD2<Float>] = []
+    private var restingGaze = SIMD2<Float>(0, 0)
+
+    // Samples near center are skipped: the dot passes through center between every
+    // target, and natural pursuit lag would otherwise be scored as an error there.
+    private let minDotOffsetToScore: CGFloat = 0.4
+    private let minGazeProjection: Float = 0.04
+    private let minDirectionAgreement: Float = 0.5 // cos(60°)
+    private var consecutiveMisses = 0
+    private var lastErrorFeedback = Date.distantPast
 
     // Navigation/Skip buttons for instructions
     private var instructionNextButton: UIButton?
@@ -93,7 +112,8 @@ class SmoothPursuitsViewController: UIViewController, ARSessionDelegate {
         centerMessageLabel.layer.removeAllAnimations()
         instructionLabel.layer.removeAllAnimations()
         currentPhase = .none
-        isLookingAtScreen = false
+        latestGaze = nil
+        latestGazeTime = nil
         self.tabBarController?.tabBar.isHidden = false
     }
 
@@ -223,8 +243,12 @@ class SmoothPursuitsViewController: UIViewController, ARSessionDelegate {
             self.instructionPrevButton?.removeFromSuperview()
         }
         
+        restingGazeSamples.removeAll()
+        isSamplingRestingGaze = true
         runStartCountdown { [weak self] in
             guard let self = self, self.isExerciseActive, self.currentPhase == .none else { return }
+            self.isSamplingRestingGaze = false
+            self.restingGaze = RestingGaze.estimate(from: self.restingGazeSamples)
             self.startSmoothPursuitPhase()
         }
     }
@@ -382,12 +406,21 @@ class SmoothPursuitsViewController: UIViewController, ARSessionDelegate {
     }
 
     func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
-        guard isExerciseActive, let faceAnchor = anchors.compactMap({ $0 as? ARFaceAnchor }).first else {
-            isLookingAtScreen = false
+        guard isExerciseActive,
+              let faceAnchor = anchors.compactMap({ $0 as? ARFaceAnchor }).first,
+              faceAnchor.isTracked else {
+            latestGaze = nil
             return
         }
-        let lookAt = faceAnchor.lookAtPoint
-        isLookingAtScreen = abs(lookAt.x) < 0.2 && abs(lookAt.y) < 0.2
+        let gaze = SIMD2<Float>(faceAnchor.lookAtPoint.x, faceAnchor.lookAtPoint.y)
+        let blinkLeft = faceAnchor.blendShapes[.eyeBlinkLeft]?.floatValue ?? 0
+        let blinkRight = faceAnchor.blendShapes[.eyeBlinkRight]?.floatValue ?? 0
+        latestEyesClosed = max(blinkLeft, blinkRight) >= eyeClosedThreshold
+        latestGaze = gaze
+        latestGazeTime = Date()
+        if isSamplingRestingGaze && !latestEyesClosed {
+            restingGazeSamples.append(gaze)
+        }
         if currentPhase == .tracking {
             let transform = faceAnchor.transform
             let pitch = abs(asin(min(1.0, max(-1.0, Double(transform.columns.2.y)))))
@@ -426,24 +459,68 @@ class SmoothPursuitsViewController: UIViewController, ARSessionDelegate {
 
     private func startGazeMonitor() {
         gazeTimer?.invalidate()
-        gazeTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+        consecutiveMisses = 0
+        gazeTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self = self, self.isExerciseActive, self.currentPhase == .tracking else { return }
-                self.totalFramesChecked += 1
-                let currentDirection = self.getDirectionName(for: self.currentTargetDirectionIndex)
-                self.directionChecks[currentDirection, default: 0] += 1
-                if self.isLookingAtScreen {
-                    if self.instructionLabel.alpha != 0 { UIView.animate(withDuration: 0.3) { self.instructionLabel.alpha = 0 } }
-                } else {
-                    self.totalErrors += 1
-                    self.directionFails[currentDirection, default: 0] += 1
-                    Vibrator.playError()
-                    self.instructionLabel.textColor = .systemRed
-                    self.instructionLabel.text = "Please keep your eyes on the screen!"
-                    self.instructionLabel.alpha = 1
-                }
+                self?.evaluatePursuitSample()
             }
         }
+    }
+
+    private func evaluatePursuitSample() {
+        guard isExerciseActive, currentPhase == .tracking else { return }
+        guard let dot = currentDotOffset() else { return }
+
+        let halfWidth = max(view.bounds.width / 2, 1)
+        let halfHeight = max(view.bounds.height / 2, 1)
+        let normalizedDistance = hypot(dot.x / halfWidth, dot.y / halfHeight)
+        guard normalizedDistance >= minDotOffsetToScore else { return }
+        if latestEyesClosed { return }
+
+        let currentDirection = getDirectionName(for: currentTargetDirectionIndex)
+        totalFramesChecked += 1
+        directionChecks[currentDirection, default: 0] += 1
+
+        let isFresh = latestGazeTime.map { Date().timeIntervalSince($0) < staleGazeInterval } ?? false
+        let isOnTarget: Bool
+        if let gaze = latestGaze, isFresh {
+            // Screen y grows downward; lookAtPoint y grows upward.
+            let dotDirection = simd_normalize(SIMD2<Float>(Float(dot.x), Float(-dot.y)))
+            let gazeOffset = gaze - restingGaze
+            let projection = simd_dot(gazeOffset, dotDirection)
+            let agreement = projection / max(simd_length(gazeOffset), 0.0001)
+            isOnTarget = projection > minGazeProjection && agreement > minDirectionAgreement
+        } else {
+            isOnTarget = false
+        }
+
+        if isOnTarget {
+            consecutiveMisses = 0
+            if instructionLabel.alpha != 0 { UIView.animate(withDuration: 0.3) { self.instructionLabel.alpha = 0 } }
+            return
+        }
+
+        totalErrors += 1
+        directionFails[currentDirection, default: 0] += 1
+        consecutiveMisses += 1
+        // Only nudge once the miss is sustained, and not more than once a second,
+        // so a single lagging sample doesn't buzz the user mid-pursuit.
+        if consecutiveMisses >= 2, Date().timeIntervalSince(lastErrorFeedback) > 1.0 {
+            lastErrorFeedback = Date()
+            Vibrator.playError()
+            instructionLabel.textColor = .systemRed
+            instructionLabel.text = isFresh ? "Follow the dot with your eyes" : "Keep your face in view of the camera"
+            instructionLabel.alpha = 1
+        }
+    }
+
+    /// The dot's on-screen offset from center, read from the in-flight animation.
+    private func currentDotOffset() -> CGPoint? {
+        // The presentation layer holds the in-flight animated position; it can be nil
+        // before the first render commit, so fall back to the model value.
+        let layer = circleView.layer.presentation() ?? circleView.layer
+        let transform = layer.affineTransform()
+        return CGPoint(x: transform.tx, y: transform.ty)
     }
 
     private func getDirectionName(for index: Int) -> String {

@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import Security
 
 @MainActor
 public final class SupabaseService: ObservableObject {
@@ -90,103 +91,221 @@ public final class SupabaseService: ObservableObject {
         )
     }
 
-    // MARK: - Check User Exists by Email
-    public func checkUserExists(email: String) async -> Bool {
-        let cleanEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !cleanEmail.isEmpty else { return false }
+    // MARK: - Auth Session (Keychain-backed)
+    //
+    // Real Supabase Auth replaces the old homegrown `users.password` column + client-side string
+    // comparison (which stored passwords in plaintext and let the public anon key read every row).
+    // Supabase Auth handles hashing/sessions server-side; we just hold the issued tokens.
 
-        guard let encodedEmail = cleanEmail.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let url = URL(string: "\(baseURL)/rest/v1/users?email=eq.\(encodedEmail)&select=id") else {
-            return false
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.setValue(apiKey, forHTTPHeaderField: "apikey")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
-                return false
-            }
-            if let json = try JSONSerialization.jsonObject(with: data) as? [[String: Any]], !json.isEmpty {
-                return true
-            }
-            return false
-        } catch {
-            print("[SupabaseService] checkUserExists error: \(error)")
-            return false
-        }
+    private enum KeychainKey {
+        static let accessToken = "lucid.auth.accessToken"
+        static let refreshToken = "lucid.auth.refreshToken"
+        static let authUserId = "lucid.auth.userId"
     }
 
-    // MARK: - Verify Password
-    public func verifyPassword(email: String, password: String) async -> Bool {
-        let cleanEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !cleanEmail.isEmpty, !password.isEmpty else { return false }
+    private var accessToken: String? { Keychain.load(KeychainKey.accessToken) }
+    private var refreshToken: String? { Keychain.load(KeychainKey.refreshToken) }
+    public var authUserId: UUID? { Keychain.load(KeychainKey.authUserId).flatMap(UUID.init) }
 
-        guard let encodedEmail = cleanEmail.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let url = URL(string: "\(baseURL)/rest/v1/users?email=eq.\(encodedEmail)&select=password") else {
-            return false
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.setValue(apiKey, forHTTPHeaderField: "apikey")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
-                return false
-            }
-            if let json = try JSONSerialization.jsonObject(with: data) as? [[String: Any]],
-               let record = json.first,
-               let storedPass = record["password"] as? String {
-                return storedPass == password
-            }
-            return false
-        } catch {
-            print("[SupabaseService] verifyPassword error: \(error)")
-            return false
-        }
+    private func storeSession(accessToken: String, refreshToken: String, userId: String) {
+        Keychain.save(KeychainKey.accessToken, accessToken)
+        Keychain.save(KeychainKey.refreshToken, refreshToken)
+        Keychain.save(KeychainKey.authUserId, userId)
     }
 
-    // MARK: - Create User (New Account Registration)
-    public func createUser(
-        email: String,
-        password: String,
-        name: String? = nil
-    ) async -> Result<UserProfile, Error> {
+    private func clearSession() {
+        Keychain.delete(KeychainKey.accessToken)
+        Keychain.delete(KeychainKey.refreshToken)
+        Keychain.delete(KeychainKey.authUserId)
+    }
+
+    /// Builds a request authorized as the signed-in user when a session exists, otherwise falls back
+    /// to the anonymous key (guest profiles, pre-auth reads).
+    private func authorizedRequest(url: URL, method: String) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue(apiKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(accessToken ?? apiKey)", forHTTPHeaderField: "Authorization")
+        return request
+    }
+
+    /// Exchanges the stored refresh token for a new access token. Best-effort — on failure the caller
+    /// just proceeds with whatever token (or lack of one) it already has, matching this file's existing
+    /// "degrade gracefully, never crash the UI over a network hiccup" style.
+    private func refreshSessionIfNeeded() async {
+        guard let refreshToken,
+              let url = URL(string: "\(baseURL)/auth/v1/token?grant_type=refresh_token") else { return }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(apiKey, forHTTPHeaderField: "apikey")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["refresh_token": refreshToken])
+
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let newAccess = json["access_token"] as? String,
+              let newRefresh = json["refresh_token"] as? String,
+              let user = json["user"] as? [String: Any],
+              let userId = user["id"] as? String else { return }
+
+        storeSession(accessToken: newAccess, refreshToken: newRefresh, userId: userId)
+    }
+
+    private func authErrorMessage(from data: Data, fallback: String) -> String {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return fallback }
+        return (json["error_description"] as? String)
+            ?? (json["msg"] as? String)
+            ?? (json["message"] as? String)
+            ?? fallback
+    }
+
+    // MARK: - Sign Up (New Account)
+    public func signUp(email: String, password: String, name: String?) async -> Result<UserProfile, Error> {
         let cleanEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !cleanEmail.isEmpty else {
             return .failure(NSError(domain: "SupabaseService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Email cannot be empty."]))
         }
-        guard !password.isEmpty, password.count >= 6 else {
+        guard password.count >= 6 else {
             return .failure(NSError(domain: "SupabaseService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Password must be at least 6 characters."]))
         }
-
-        // Verify if user already exists
-        let exists = await checkUserExists(email: cleanEmail)
-        if exists {
-            return .failure(NSError(domain: "SupabaseService", code: 409, userInfo: [NSLocalizedDescriptionKey: "An account with this email already exists. Please sign in instead."]))
-        }
-
-        guard let url = URL(string: "\(baseURL)/rest/v1/users?on_conflict=email") else {
+        guard let url = URL(string: "\(baseURL)/auth/v1/signup") else {
             return .failure(NSError(domain: "SupabaseService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid API URL."]))
         }
 
-        let newId = UUID()
-        let nowISO = Self.isoFormatterStandard.string(from: Date())
-        let trimmedName = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(apiKey, forHTTPHeaderField: "apikey")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["email": cleanEmail, "password": password])
 
-        var body: [String: Any] = [
-            "id": newId.uuidString,
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                return .failure(NSError(domain: "SupabaseService", code: 500, userInfo: [NSLocalizedDescriptionKey: "Network response error."]))
+            }
+            guard (200...299).contains(httpResponse.statusCode) else {
+                let message = authErrorMessage(from: data, fallback: "Could not create your account.")
+                return .failure(NSError(domain: "SupabaseService", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: message]))
+            }
+
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return .failure(NSError(domain: "SupabaseService", code: 500, userInfo: [NSLocalizedDescriptionKey: "Unexpected response creating your account."]))
+            }
+            let user = (json["user"] as? [String: Any]) ?? json
+            guard let userId = user["id"] as? String else {
+                return .failure(NSError(domain: "SupabaseService", code: 500, userInfo: [NSLocalizedDescriptionKey: "Unexpected response creating your account."]))
+            }
+
+            // If the project requires email confirmation, Supabase returns the user but no session yet.
+            guard let accessToken = json["access_token"] as? String,
+                  let refreshToken = json["refresh_token"] as? String else {
+                return .failure(NSError(domain: "SupabaseService", code: 202, userInfo: [NSLocalizedDescriptionKey: "Check your inbox to confirm your email, then sign in."]))
+            }
+
+            storeSession(accessToken: accessToken, refreshToken: refreshToken, userId: userId)
+
+            let profile = await createProfileRow(userId: userId, email: cleanEmail, name: name)
+            return .success(profile)
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    // MARK: - Sign In (Existing Account)
+    public func signIn(email: String, password: String) async -> Result<UserProfile, Error> {
+        let cleanEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !cleanEmail.isEmpty, !password.isEmpty else {
+            return .failure(NSError(domain: "SupabaseService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Enter your email and password."]))
+        }
+        guard let url = URL(string: "\(baseURL)/auth/v1/token?grant_type=password") else {
+            return .failure(NSError(domain: "SupabaseService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid API URL."]))
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(apiKey, forHTTPHeaderField: "apikey")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["email": cleanEmail, "password": password])
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                return .failure(NSError(domain: "SupabaseService", code: 500, userInfo: [NSLocalizedDescriptionKey: "Network response error."]))
+            }
+            guard (200...299).contains(httpResponse.statusCode),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let accessToken = json["access_token"] as? String,
+                  let refreshToken = json["refresh_token"] as? String,
+                  let user = json["user"] as? [String: Any],
+                  let userId = user["id"] as? String else {
+                let message = authErrorMessage(from: data, fallback: "Incorrect email or password.")
+                return .failure(NSError(domain: "SupabaseService", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: message]))
+            }
+
+            storeSession(accessToken: accessToken, refreshToken: refreshToken, userId: userId)
+
+            if let uuid = UUID(uuidString: userId), let profile = await fetchProfile(byId: uuid) {
+                return .success(profile)
+            }
+            // Signed in but no profile row yet (e.g. row was deleted server-side) — create a fresh one.
+            let profile = await createProfileRow(userId: userId, email: cleanEmail, name: nil)
+            return .success(profile)
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    // MARK: - Sign In with Apple
+    public func signInWithApple(identityToken: String, fullName: String?) async -> Result<UserProfile, Error> {
+        guard let url = URL(string: "\(baseURL)/auth/v1/token?grant_type=id_token") else {
+            return .failure(NSError(domain: "SupabaseService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid API URL."]))
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(apiKey, forHTTPHeaderField: "apikey")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["provider": "apple", "id_token": identityToken])
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let accessToken = json["access_token"] as? String,
+                  let refreshToken = json["refresh_token"] as? String,
+                  let user = json["user"] as? [String: Any],
+                  let userId = user["id"] as? String else {
+                let message = authErrorMessage(from: data, fallback: "Apple Sign In failed.")
+                return .failure(NSError(domain: "SupabaseService", code: (response as? HTTPURLResponse)?.statusCode ?? 500, userInfo: [NSLocalizedDescriptionKey: message]))
+            }
+
+            storeSession(accessToken: accessToken, refreshToken: refreshToken, userId: userId)
+            let email = (user["email"] as? String) ?? ""
+
+            if let uuid = UUID(uuidString: userId), let existing = await fetchProfile(byId: uuid) {
+                return .success(existing)
+            }
+            let profile = await createProfileRow(userId: userId, email: email, name: fullName)
+            return .success(profile)
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    /// Creates the public profile row for a just-authenticated user. No password is ever stored here —
+    /// Supabase Auth already owns credential storage.
+    private func createProfileRow(userId: String, email: String, name: String?) async -> UserProfile {
+        let trimmedName = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let nowISO = Self.isoFormatterStandard.string(from: Date())
+
+        let body: [String: Any] = [
+            "id": userId,
             "name": trimmedName,
-            "email": cleanEmail,
-            "password": password,
+            "email": email,
             "left_eye_power": 0.0,
             "right_eye_power": 0.0,
             "previous_conditions": [] as [String],
@@ -203,63 +322,42 @@ public final class SupabaseService: ObservableObject {
             "updated_at": nowISO
         ]
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue(apiKey, forHTTPHeaderField: "apikey")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        let fallbackProfile = UserProfile(
+            id: UUID(uuidString: userId) ?? UUID(),
+            name: trimmedName,
+            email: email
+        )
+
+        guard let url = URL(string: "\(baseURL)/rest/v1/users?on_conflict=id") else {
+            saveLocalProfile(fallbackProfile)
+            return fallbackProfile
+        }
+
+        var request = authorizedRequest(url: url, method: "POST")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("resolution=merge-duplicates,return=representation", forHTTPHeaderField: "Prefer")
 
         do {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
             let (data, response) = try await URLSession.shared.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse else {
-                return .failure(NSError(domain: "SupabaseService", code: 500, userInfo: [NSLocalizedDescriptionKey: "Network response error."]))
-            }
-
-            if (200...299).contains(httpResponse.statusCode) {
-                var profile: UserProfile
-                if let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
-                   let record = json.first {
-                    profile = parseProfileRecord(record)
-                } else if let fetched = await fetchProfile(byEmail: cleanEmail) {
-                    profile = fetched
-                } else {
-                    profile = UserProfile(
-                        id: newId,
-                        name: trimmedName,
-                        email: cleanEmail,
-                        leftEyePower: 0.0,
-                        rightEyePower: 0.0,
-                        hasGlassesOrContacts: false,
-                        previousConditions: [],
-                        estimatedDailyScreenTimeHours: 6.0,
-                        actualDailyScreenTimeHours: 0.0,
-                        primaryActivity: "Coding & Reading",
-                        peakFatigueTime: "Late Day (5–8)",
-                        recommendedExerciseIds: [],
-                        baselineRestScore: 70
-                    )
-                }
-
-                // Immediately cache locally on device
+            if let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+               let record = json.first {
+                let profile = parseProfileRecord(record)
                 saveLocalProfile(profile)
-                print("[SupabaseService] Created new user: \(profile.email), cached locally and synced.")
-                return .success(profile)
-            } else {
-                let errString = String(data: data, encoding: .utf8) ?? "Unknown server error"
-                print("[SupabaseService] Create user failed (\(httpResponse.statusCode)): \(errString)")
-                return .failure(NSError(domain: "SupabaseService", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: "Failed to create user: \(errString)"]))
+                return profile
             }
         } catch {
-            print("[SupabaseService] Network error creating user: \(error)")
-            return .failure(error)
+            print("[SupabaseService] createProfileRow error: \(error)")
         }
+
+        saveLocalProfile(fallbackProfile)
+        return fallbackProfile
     }
 
     // MARK: - Upsert Profile
     @discardableResult
-    public func upsertProfile(_ profile: UserProfile, password: String? = nil) async -> Bool {
+    public func upsertProfile(_ profile: UserProfile) async -> Bool {
         let cleanEmail = profile.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let hasEmail = !cleanEmail.isEmpty
 
@@ -269,10 +367,7 @@ public final class SupabaseService: ObservableObject {
 
         guard let url = URL(string: urlString) else { return false }
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue(apiKey, forHTTPHeaderField: "apikey")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        var request = authorizedRequest(url: url, method: "POST")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("resolution=merge-duplicates,return=representation", forHTTPHeaderField: "Prefer")
 
@@ -298,10 +393,6 @@ public final class SupabaseService: ObservableObject {
             body["email"] = cleanEmail
         } else {
             body["email"] = NSNull() // Essential: prevents Postgres duplicate empty string constraint error
-        }
-
-        if let password, !password.isEmpty {
-            body["password"] = password
         }
 
         // Cache on device immediately
@@ -338,11 +429,7 @@ public final class SupabaseService: ObservableObject {
             return nil
         }
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.setValue(apiKey, forHTTPHeaderField: "apikey")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let request = authorizedRequest(url: url, method: "GET")
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -367,11 +454,7 @@ public final class SupabaseService: ObservableObject {
             return nil
         }
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.setValue(apiKey, forHTTPHeaderField: "apikey")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let request = authorizedRequest(url: url, method: "GET")
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -393,6 +476,8 @@ public final class SupabaseService: ObservableObject {
     // MARK: - Synchronize Profile with Remote
     @discardableResult
     public func syncProfileWithRemote() async -> UserProfile? {
+        await refreshSessionIfNeeded()
+
         guard let local = currentProfile ?? loadLocalProfile() else {
             return nil
         }
@@ -454,6 +539,7 @@ public final class SupabaseService: ObservableObject {
     // MARK: - Logout
     public func logout() {
         self.currentProfile = nil
+        clearSession()
         UserDefaults.standard.removeObject(forKey: localProfileKey)
         UserDefaults.standard.removeObject(forKey: localEmailKey)
         UserDefaults.standard.removeObject(forKey: localUserIdKey)
@@ -463,5 +549,44 @@ public final class SupabaseService: ObservableObject {
         UserDefaults.standard.removeObject(forKey: "lucid_last_exercise_date")
         UserDefaults.standard.synchronize()
         print("[SupabaseService] User successfully logged out and local session cleared.")
+    }
+}
+
+// MARK: - Minimal Keychain wrapper for auth tokens
+
+private enum Keychain {
+    static func save(_ key: String, _ value: String) {
+        let data = Data(value.utf8)
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: key
+        ]
+        SecItemDelete(query as CFDictionary)
+
+        var attributes = query
+        attributes[kSecValueData as String] = data
+        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        SecItemAdd(attributes as CFDictionary, nil)
+    }
+
+    static func load(_ key: String) -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: key,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var result: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func delete(_ key: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: key
+        ]
+        SecItemDelete(query as CFDictionary)
     }
 }

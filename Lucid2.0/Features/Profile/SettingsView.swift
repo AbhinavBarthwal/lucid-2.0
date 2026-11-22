@@ -7,6 +7,7 @@
 
 import SwiftUI
 import UserNotifications
+import FamilyControls
 
 // MARK: - Settings View
 
@@ -16,7 +17,8 @@ public struct SettingsView: View {
     
     // Notification toggles
     @AppStorage("lucid_setting_daily_reminder") private var dailyReminderEnabled: Bool = true
-    @AppStorage("lucid_setting_screen_breaks") private var screenBreaksEnabled: Bool = true
+    @State private var screenBreakViewModel = ScreenBreakViewModel.shared
+    @AppStorage("lucid_setting_test_reminder") private var testReminderEnabled: Bool = true
     @AppStorage("lucid_setting_streak_saver") private var streakSaverEnabled: Bool = true
     @AppStorage("lucid_setting_weekly_reports") private var weeklyReportsEnabled: Bool = true
     @AppStorage("lucid_setting_reminder_hour") private var reminderHour: Int = 10
@@ -131,6 +133,19 @@ public struct SettingsView: View {
         .onAppear {
             loadInitialSettings()
         }
+        .familyActivityPicker(isPresented: $screenBreakViewModel.showAppPicker, selection: $screenBreakViewModel.selection)
+        .onChange(of: screenBreakViewModel.selection) { _, _ in
+            screenBreakViewModel.selectionDidChange()
+        }
+        .onChange(of: screenBreakViewModel.showAppPicker) { _, isShowing in
+            if !isShowing { screenBreakViewModel.appPickerDismissed() }
+        }
+        .onChange(of: dailyReminderEnabled) { _, _ in NotificationEngine.shared.refreshAllSchedules() }
+        .onChange(of: testReminderEnabled) { _, _ in NotificationEngine.shared.refreshAllSchedules() }
+        .onChange(of: streakSaverEnabled) { _, _ in NotificationEngine.shared.refreshAllSchedules() }
+        .onChange(of: weeklyReportsEnabled) { _, _ in NotificationEngine.shared.refreshAllSchedules() }
+        .onChange(of: reminderHour) { _, _ in NotificationEngine.shared.refreshAllSchedules() }
+        .onChange(of: reminderMinute) { _, _ in NotificationEngine.shared.refreshAllSchedules() }
     }
 
     // MARK: - Header Bar
@@ -362,6 +377,7 @@ public struct SettingsView: View {
                                 let granted = await NotificationSetupManager.shared.requestAuthorization()
                                 await MainActor.run {
                                     areSystemNotificationsEnabled = granted
+                                    NotificationEngine.shared.refreshAllSchedules()
                                 }
                             }
                         }
@@ -423,12 +439,30 @@ public struct SettingsView: View {
                 Divider().background(.white.opacity(0.08))
 
                 // Screen break prompt
-                Toggle(isOn: $screenBreaksEnabled) {
+                Toggle(isOn: Binding(
+                    get: { screenBreakViewModel.isEnabled },
+                    set: { screenBreakViewModel.setEnabled($0) }
+                )) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("20-20-20 Screen Breaks")
                             .font(Typography.subheadline(weight: .semibold, design: .rounded))
                             .foregroundStyle(.white)
-                        Text("Micro-nudges to blink and relax accommodation")
+                        Text("Micro-nudges to blink and relax accommodation. Configure apps & interval in the Protect tab.")
+                            .font(Typography.caption2(design: .rounded))
+                            .foregroundStyle(.white.opacity(0.45))
+                    }
+                }
+                .tint(Palette.amber)
+
+                Divider().background(.white.opacity(0.08))
+
+                // Vision test reminder
+                Toggle(isOn: $testReminderEnabled) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Vision Test Reminders")
+                            .font(Typography.subheadline(weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white)
+                        Text("Biweekly nudge when your Visual Acuity & Dry Eye Check are due")
                             .font(Typography.caption2(design: .rounded))
                             .foregroundStyle(.white.opacity(0.45))
                     }
@@ -649,6 +683,8 @@ public struct SettingsView: View {
                 areSystemNotificationsEnabled = enabled
             }
         }
+
+        screenBreakViewModel.refreshAuthorization()
 
         if let current = supabase.currentProfile {
             nameInput = current.name

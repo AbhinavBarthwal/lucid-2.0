@@ -30,6 +30,10 @@ class NearFarFocusViewController: UIViewController, ARSessionDelegate {
     private let speechSynthesizer = AVSpeechSynthesizer()
     private let arSession = ARSession()
     private var isLookingAtScreen = false
+    private var lastFaceSeen: Date?
+    private var isFaceVisible: Bool {
+        lastFaceSeen.map { Date().timeIntervalSince($0) < 0.5 } ?? false
+    }
     private var totalFramesChecked = 0
     private var totalErrors = 0
     private var gazeTimer: Timer?
@@ -486,10 +490,13 @@ class NearFarFocusViewController: UIViewController, ARSessionDelegate {
     }
     
     func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
-        guard isExerciseActive, let faceAnchor = anchors.compactMap({ $0 as? ARFaceAnchor }).first else {
+        guard isExerciseActive,
+              let faceAnchor = anchors.compactMap({ $0 as? ARFaceAnchor }).first,
+              faceAnchor.isTracked else {
             isLookingAtScreen = false
             return
         }
+        lastFaceSeen = Date()
         let lookAt = faceAnchor.lookAtPoint
         isLookingAtScreen = abs(lookAt.x) < 0.2 && abs(lookAt.y) < 0.2
     }
@@ -499,10 +506,11 @@ class NearFarFocusViewController: UIViewController, ARSessionDelegate {
         gazeTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self = self, self.isExerciseActive else { return }
-                self.totalFramesChecked += 1
+                let faceVisible = self.isFaceVisible
                 
                 if self.currentPhase == .near {
-                    if self.isLookingAtScreen {
+                    self.totalFramesChecked += 1
+                    if faceVisible && self.isLookingAtScreen {
                         if self.instructionLabel.textColor == .systemRed {
                             UIView.animate(withDuration: 0.3) {
                                 self.instructionLabel.textColor = .lightGray
@@ -513,9 +521,14 @@ class NearFarFocusViewController: UIViewController, ARSessionDelegate {
                         self.totalErrors += 1
                         Vibrator.playError()
                         self.instructionLabel.textColor = .systemRed
-                        self.instructionLabel.text = "⚠️ Please look at the screen!"
+                        self.instructionLabel.text = faceVisible ? "⚠️ Please look at the screen!" : "Keep your face in view of the camera"
                     }
                 } else if self.currentPhase == .far {
+                    // Turning to look at something far away can take the face out of
+                    // the camera's view, so a lost face here is unverifiable rather than
+                    // a pass — it's left out of the score instead of counted as success.
+                    guard faceVisible else { return }
+                    self.totalFramesChecked += 1
                     if !self.isLookingAtScreen {
                         if self.instructionLabel.textColor == .systemRed {
                             UIView.animate(withDuration: 0.3) {

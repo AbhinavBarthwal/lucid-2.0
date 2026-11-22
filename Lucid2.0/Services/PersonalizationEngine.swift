@@ -7,15 +7,6 @@
 
 import Foundation
 
-public struct ScreenDiscrepancyInsight: Sendable {
-    public let userEstimatedHours: Double
-    public let actualHours: Double
-    public let deltaHours: Double
-    public let isSignificant: Bool
-    public let message: String
-    public let recommendationNote: String
-}
-
 public struct PersonalizedPlanBlueprint: Sendable {
     public let headline: String
     public let subheadline: String
@@ -23,7 +14,6 @@ public struct PersonalizedPlanBlueprint: Sendable {
     public let recommendedExercises: [ExerciseDefinition]
     public let startingRestScore: Int
     public let recommendedBlockSlot: String
-    public let discrepancy: ScreenDiscrepancyInsight?
 }
 
 @MainActor
@@ -34,7 +24,13 @@ public final class PersonalizationEngine {
 
     /// Calculates a complete tailored plan from the user's survey responses
     public func generateBlueprint(from profile: UserProfile) -> PersonalizedPlanBlueprint {
-        var selectedExerciseIds: Set<String> = []
+        // Ordered + de-duplicated so the same answers always produce the same plan in the same order
+        // (a Set here previously made exercise order change randomly between launches).
+        var selectedExerciseIds: [String] = []
+        func select(_ id: String) {
+            guard !selectedExerciseIds.contains(id) else { return }
+            selectedExerciseIds.append(id)
+        }
 
         let screenHours = profile.estimatedDailyScreenTimeHours
         let conditions = Set(profile.previousConditions)
@@ -42,38 +38,52 @@ public final class PersonalizationEngine {
         let hasPresbyopia = profile.leftEyePower > 0.75 || profile.rightEyePower > 0.75 || conditions.contains("Presbyopia")
 
         // 1. Condition & Screen Time Rules
-        if conditions.contains("Dry Eyes") || conditions.contains("Eye Fatigue") || screenHours >= 7.0 {
-            selectedExerciseIds.insert("blink_training")
+        // NOTE: `previousConditions` stores the exact onboarding option strings, so matches must
+        // use those exact values (e.g. the compound "Headaches / Neck Pain"), not substrings of them.
+        if conditions.contains("Dry Eyes") || screenHours >= 7.0 {
+            select("blink_training")
+        }
+
+        if conditions.contains("Light Sensitivity") {
+            select("blink_training")
         }
 
         if conditions.contains("Digital Eye Strain") || hasMyopia || profile.primaryActivity.contains("Coding") || profile.primaryActivity.contains("Reading") {
-            selectedExerciseIds.insert("near_far_focus")
+            select("near_far_focus")
         }
 
-        if conditions.contains("Headaches") || conditions.contains("Neck Pain") || screenHours >= 8.0 {
-            selectedExerciseIds.insert("neck_mobility")
+        if conditions.contains("Headaches / Neck Pain") || screenHours >= 8.0 {
+            select("neck_mobility")
         }
 
-        if conditions.contains("Blurry Vision") || conditions.contains("Astigmatism") || screenHours >= 6.0 {
-            selectedExerciseIds.insert("smooth_pursuits")
+        if conditions.contains("Blurry Vision") || screenHours >= 6.0 {
+            select("smooth_pursuits")
+        }
+
+        if conditions.contains("Blurry Vision") || conditions.contains("Eye Fatigue") {
+            select("figure_8")
+        }
+
+        if conditions.contains("Astigmatism") {
+            select("saccadic_jumps")
         }
 
         if conditions.contains("Convergence Issues") || hasPresbyopia {
-            selectedExerciseIds.insert("pencil_pushup")
+            select("pencil_pushup")
         }
 
         let isLateOrEvening = profile.peakFatigueTime.contains("Evening") || profile.peakFatigueTime.contains("Late") || profile.peakFatigueTime.contains("Night")
         if isLateOrEvening || screenHours >= 9.0 {
-            selectedExerciseIds.insert("figure_8")
+            select("figure_8")
         }
 
         // Fallbacks if fewer than 2 selected
         if selectedExerciseIds.count < 2 {
-            selectedExerciseIds.insert("smooth_pursuits")
-            selectedExerciseIds.insert("blink_training")
+            select("smooth_pursuits")
+            select("blink_training")
         }
 
-        // Map IDs to catalog
+        // Map IDs to catalog, preserving selection order
         let resolvedExercises = selectedExerciseIds.compactMap { id in
             ExerciseDefinition.catalog.first { $0.id == id }
         }
@@ -92,34 +102,7 @@ public final class PersonalizationEngine {
         baseScore -= min(conditions.count * 3, 15)
         let startingRest = max(45, min(85, baseScore))
 
-        // 3. Screen Time Discrepancy Analysis (Only if Screen Time API was authorized)
-        var discrepancy: ScreenDiscrepancyInsight? = nil
-        if let actual = profile.actualDailyScreenTimeHours {
-            let delta = actual - screenHours
-
-            if abs(delta) >= 0.5 {
-                let isOver = delta > 0
-                let diffFormatted = String(format: "%.1f", abs(delta))
-                let msg = isOver
-                    ? "Your actual screen usage averages ~\(String(format: "%.1f", actual)) hrs/day (\(diffFormatted) hrs higher than estimated). That extra screen exposure significantly accelerates tear evaporation and focus lock."
-                    : "Your actual screen usage averages ~\(String(format: "%.1f", actual)) hrs/day. You're already doing better than you thought!"
-
-                let note = isOver
-                    ? "We've added extra blink pulses and midday neck resets to counteract this gap."
-                    : "Your customized routine will keep this healthy habit sustained."
-
-                discrepancy = ScreenDiscrepancyInsight(
-                    userEstimatedHours: screenHours,
-                    actualHours: actual,
-                    deltaHours: delta,
-                    isSignificant: true,
-                    message: msg,
-                    recommendationNote: note
-                )
-            }
-        }
-
-        // 4. Headline & Primary Focus
+        // 3. Headline & Primary Focus
         let headline: String
         let subheadline: String
         let primaryFocus: String
@@ -146,8 +129,7 @@ public final class PersonalizationEngine {
             primaryFocus: primaryFocus,
             recommendedExercises: resolvedExercises,
             startingRestScore: startingRest,
-            recommendedBlockSlot: recommendedBlock,
-            discrepancy: discrepancy
+            recommendedBlockSlot: recommendedBlock
         )
     }
 
@@ -159,18 +141,12 @@ public final class PersonalizationEngine {
         // Update score engine
         LucidScoreEngine.shared.updateRestScore(blueprint.startingRestScore)
 
-        // Update daily exercise scheduler with their personalized stack
-        let items = blueprint.recommendedExercises.prefix(2).map { DailyExerciseItem(exercise: $0) }
-        DailyExerciseScheduler.shared.currentStack = DailyExerciseStack(date: Date(), items: Array(items))
+        // Update daily exercise scheduler with their full personalized stack (previously
+        // truncated to 2, silently dropping exercises the plan-reveal screen had already promised).
+        let items = blueprint.recommendedExercises.map { DailyExerciseItem(exercise: $0) }
+        DailyExerciseScheduler.shared.currentStack = DailyExerciseStack(date: Date(), items: items)
 
         // Save profile
         SupabaseService.shared.saveLocalProfile(profile)
-    }
-
-    /// Provides realistic simulated actual screen time from DeviceActivity / historical usage
-    public func fetchSimulatedActualScreenTime(estimated: Double) -> Double {
-        // Average screen workers underestimate screen time by 1.5 to 2.5 hours
-        let adjustment = estimated >= 6.0 ? 1.8 : 0.8
-        return round((estimated + adjustment) * 10) / 10
     }
 }

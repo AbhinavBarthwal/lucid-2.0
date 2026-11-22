@@ -9,11 +9,14 @@ import SwiftUI
 
 public struct ScoreHeroView: View {
     @State private var floating = false
-    @State private var scoreEngine = LucidScoreEngine.shared
+    @State private var shimmer = false
+    var scoreEngine: LucidScoreEngine = .shared
     @ScaledMetric(relativeTo: .largeTitle) private var scoreFontSize: CGFloat = 46
     private let characterImage = "Luc"
 
-    public init() {}
+    public init(scoreEngine: LucidScoreEngine = .shared) {
+        self.scoreEngine = scoreEngine
+    }
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -59,11 +62,13 @@ public struct ScoreHeroView: View {
                 } else {
                     // Uncalibrated / Blurred Glass State
                     ZStack {
-                        // Blurred score silhouette
-                        Text("72")
-                            .font(Typography.hero(size: scoreFontSize, weight: .bold, design: .rounded))
-                            .foregroundStyle(Palette.amber.opacity(0.4))
-                            .blur(radius: 12)
+                        // Skeleton placeholder — no real score exists yet, so don't show a fake number
+                        Capsule()
+                            .fill(Palette.amber.opacity(shimmer ? 0.3 : 0.18))
+                            .frame(width: scoreFontSize * 1.6, height: scoreFontSize * 0.7)
+                            .blur(radius: 10)
+                            .animation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true), value: shimmer)
+                            .onAppear { shimmer = true }
 
                         // Glass Badge with Lock/Calibration Sparkle
                         HStack(spacing: 6) {
@@ -168,6 +173,35 @@ public struct ScoreChip: View {
             Text(title)
                 .font(Typography.callout(weight: .semibold))
                 .foregroundStyle(Color.white.opacity(0.6))
+        }
+    }
+}
+
+#Preview("Score Hero - Numbers (Exercise, Test, Rest)") {
+    ZStack {
+        Color.black.ignoresSafeArea()
+        ScoreHeroView(
+            scoreEngine: .preview(rest: 74, exercise: 68, test: 82, isCalibrated: true)
+        )
+    }
+}
+
+#Preview("Score Hero - Calibrating") {
+    ZStack {
+        Color.black.ignoresSafeArea()
+        ScoreHeroView(
+            scoreEngine: .preview(isCalibrated: false)
+        )
+    }
+}
+
+#Preview("Score Chips") {
+    ZStack {
+        Color.black.ignoresSafeArea()
+        HStack(spacing: 24) {
+            ScoreChip(icon: "dumbbell.fill", title: "Exercise", value: 68)
+            ScoreChip(icon: "list.clipboard", title: "Tests", value: 82)
+            ScoreChip(icon: "tree.fill", title: "Rest", value: 74)
         }
     }
 }

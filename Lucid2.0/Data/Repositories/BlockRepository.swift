@@ -62,6 +62,7 @@ public final class BlockRepository: @unchecked Sendable {
         existing.removeAll(where: { $0.id == id })
         saveAllBlocks(existing)
         deleteSelection(for: id)
+        refreshActiveSelectionCache()
     }
 
     // MARK: - FamilyActivitySelection Persistence
@@ -70,10 +71,40 @@ public final class BlockRepository: @unchecked Sendable {
         do {
             let data = try PropertyListEncoder().encode(selection)
             defaults.set(data, forKey: "\(selectionKeyPrefix)\(blockId.uuidString)")
-            // Also store as active_selection for extension convenience
-            defaults.set(data, forKey: activeSelectionKey)
         } catch {
             print("[BlockRepository] Failed to encode FamilyActivitySelection: \(error)")
+        }
+        refreshActiveSelectionCache()
+    }
+
+    /// Recomputes the `active_selection` convenience cache from whichever block is actually enabled
+    /// and within its scheduled time window right now. Previously `active_selection` just mirrored
+    /// whichever block was most recently saved/edited, which could point readers at the wrong
+    /// block's app list whenever more than one schedule was configured.
+    private func refreshActiveSelectionCache() {
+        guard let activeBlock = fetchAllBlocks().first(where: isBlockActiveNow),
+              let data = defaults.data(forKey: "\(selectionKeyPrefix)\(activeBlock.id.uuidString)") else {
+            defaults.removeObject(forKey: activeSelectionKey)
+            return
+        }
+        defaults.set(data, forKey: activeSelectionKey)
+    }
+
+    private func isBlockActiveNow(_ block: ScheduledBlock) -> Bool {
+        guard block.isEnabled else { return false }
+        let now = Date()
+        let calendar = Calendar.current
+        guard let currentWeekday = Weekday(rawValue: calendar.component(.weekday, from: now)),
+              block.days.contains(currentWeekday) else { return false }
+
+        let currentTotalMinutes = calendar.component(.hour, from: now) * 60 + calendar.component(.minute, from: now)
+        let fromTotalMinutes = block.fromHour * 60 + block.fromMinute
+        let toTotalMinutes = block.toHour * 60 + block.toMinute
+
+        if fromTotalMinutes <= toTotalMinutes {
+            return currentTotalMinutes >= fromTotalMinutes && currentTotalMinutes < toTotalMinutes
+        } else {
+            return currentTotalMinutes >= fromTotalMinutes || currentTotalMinutes < toTotalMinutes
         }
     }
 

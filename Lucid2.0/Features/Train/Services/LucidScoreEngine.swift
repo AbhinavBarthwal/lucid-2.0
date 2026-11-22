@@ -25,8 +25,43 @@ public final class LucidScoreEngine {
     private let firstExerciseKey = "lucid_has_completed_first_exercise"
     private let firstTestKey = "lucid_has_completed_first_test"
 
-    public init() {
-        loadScores()
+    public init(
+        restScore: Int = 74,
+        exerciseScore: Int = 68,
+        testScore: Int = 82,
+        isCalibrated: Bool = false
+    ) {
+        self.restScore = restScore
+        self.exerciseScore = exerciseScore
+        self.testScore = testScore
+        self.hasCompletedFirstExercise = isCalibrated
+        self.hasCompletedFirstTest = isCalibrated
+        if !isCalibrated {
+            loadScores()
+        }
+    }
+
+    public static func preview(
+        rest: Int = 74,
+        exercise: Int = 68,
+        test: Int = 82,
+        isCalibrated: Bool = true
+    ) -> LucidScoreEngine {
+        let engine = LucidScoreEngine(
+            restScore: rest,
+            exerciseScore: exercise,
+            testScore: test,
+            isCalibrated: isCalibrated
+        )
+        if !isCalibrated {
+            engine.hasCompletedFirstExercise = false
+            engine.hasCompletedFirstTest = false
+        }
+        return engine
+    }
+
+    public static var uncalibrated: LucidScoreEngine {
+        preview(rest: 70, exercise: 50, test: 50, isCalibrated: false)
     }
 
     /// Whether the user has completed calibration (at least 1 exercise AND 1 test)

@@ -29,13 +29,19 @@ public struct HomeView: View {
     // MARK: - Test, Exercise, Score & Streak State
     @State private var testManager = TestScheduleManager.shared
     @State private var exerciseScheduler = DailyExerciseScheduler.shared
-    @State private var scoreEngine = LucidScoreEngine.shared
+    @State private var scoreEngine: LucidScoreEngine
     @State private var streakManager = StreakManager.shared
     @State private var currentPrompt: String = ""
     @State private var activeExercise: ExerciseDefinition?
+    @State private var showTestBattery = false
 
-    public init(blockingVM: AppBlockingViewModel, onOpenCareTab: (() -> Void)? = nil) {
+    public init(
+        blockingVM: AppBlockingViewModel,
+        scoreEngine: LucidScoreEngine = .shared,
+        onOpenCareTab: (() -> Void)? = nil
+    ) {
         self.blockingVM = blockingVM
+        self._scoreEngine = State(initialValue: scoreEngine)
         self.onOpenCareTab = onOpenCareTab
     }
 
@@ -45,7 +51,7 @@ public struct HomeView: View {
 
             ScrollView {
                 VStack(spacing: 0) {
-                    ScoreHeroView()
+                    ScoreHeroView(scoreEngine: scoreEngine)
 
                     VStack(spacing: 18) {
                         // 1. Notification Setup Card (hidden if enabled, suppressed for 15 days if dismissed)
@@ -160,6 +166,12 @@ public struct HomeView: View {
         .fullScreenCover(isPresented: $showProfile) {
             ProfileView()
         }
+        .fullScreenCover(isPresented: $showTestBattery) {
+            TestSessionView(mode: .battery) {
+                showTestBattery = false
+                completeTestBattery()
+            }
+        }
         .onAppear {
             streakManager.refreshStreakState()
             blockingVM.loadBlocks()
@@ -178,10 +190,14 @@ public struct HomeView: View {
                 }
             }
         }
+        .onChange(of: NotificationRouter.shared.pendingRoute) { _, route in
+            guard route == .exercise else { return }
+            NotificationRouter.shared.pendingRoute = .none
+        }
     }
 
     private var defaultPrompt: String {
-        IntelligencePromptEngine.shared.promptForToday(
+        HomePromptEngine.shared.promptForToday(
             score: scoreEngine.overallScore,
             slot: exerciseScheduler.currentSlot,
             nextExercise: exerciseScheduler.currentStack.currentExercise
@@ -189,7 +205,7 @@ public struct HomeView: View {
     }
 
     private func refreshPrompt() {
-        currentPrompt = IntelligencePromptEngine.shared.promptForToday(
+        currentPrompt = HomePromptEngine.shared.promptForToday(
             score: scoreEngine.overallScore,
             slot: exerciseScheduler.currentSlot,
             nextExercise: exerciseScheduler.currentStack.currentExercise
@@ -197,9 +213,11 @@ public struct HomeView: View {
     }
 
     private func handleStartTest() {
+        showTestBattery = true
+    }
+
+    private func completeTestBattery() {
         withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
-            // Completes test battery, marks tests done, updates test score and promotes Exercise card to primary!
-            testManager.completeTestBattery(cTestScore: 6.0, osdiScore: 12.0)
             refreshPrompt()
         }
     }
@@ -246,6 +264,13 @@ public struct HomeView: View {
     }
 }
 
-#Preview {
+#Preview("Home - Numbers (Exercise, Test, Rest)") {
+    HomeView(
+        blockingVM: AppBlockingViewModel(),
+        scoreEngine: .preview(rest: 74, exercise: 68, test: 82, isCalibrated: true)
+    )
+}
+
+#Preview("Home - Calibrating") {
     HomeView(blockingVM: AppBlockingViewModel())
 }

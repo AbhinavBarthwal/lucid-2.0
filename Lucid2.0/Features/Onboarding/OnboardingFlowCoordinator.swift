@@ -27,7 +27,6 @@ public struct OnboardingFlowCoordinator: View {
     @State private var password = ""
     @State private var confirmPassword = ""
     @State private var isExistingUser = false
-    @State private var isPasswordPhase = false
     @State private var isCheckingUser = false
     @State private var errorMessage: String? = nil
     @State private var planBlueprint: PersonalizedPlanBlueprint?
@@ -106,24 +105,14 @@ public struct OnboardingFlowCoordinator: View {
                             password: $password,
                             confirmPassword: $confirmPassword,
                             isExistingUser: $isExistingUser,
-                            isPasswordPhase: $isPasswordPhase,
                             isChecking: isCheckingUser,
                             errorMessage: errorMessage,
-                            onContinueWithEmail: handleEmailCheck,
                             onSignInWithApple: handleAppleSignIn,
                             onContinueAsGuest: {
                                 profile.email = ""
                                 SupabaseService.shared.saveLocalProfile(profile)
                                 withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
                                     phase = .personal
-                                }
-                            },
-                            onChangeEmail: {
-                                withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-                                    isPasswordPhase = false
-                                    password = ""
-                                    confirmPassword = ""
-                                    errorMessage = nil
                                 }
                             }
                         )
@@ -137,8 +126,7 @@ public struct OnboardingFlowCoordinator: View {
                         ScreenTimeStepView(
                             hours: $profile.estimatedDailyScreenTimeHours,
                             primaryActivity: $profile.primaryActivity,
-                            peakFatigueTime: $profile.peakFatigueTime,
-                            actualHours: $profile.actualDailyScreenTimeHours
+                            peakFatigueTime: $profile.peakFatigueTime
                         )
                         .padding(.horizontal, 24)
 
@@ -251,7 +239,7 @@ public struct OnboardingFlowCoordinator: View {
                         .foregroundStyle(Color.black)
                 }
                 .frame(maxWidth: .infinity)
-                .frame(height: 52)
+                .frame(minHeight: 52)
                 .background(
                     RoundedRectangle(cornerRadius: 44, style: .continuous)
                         .fill(Palette.warmGradient)
@@ -269,11 +257,7 @@ public struct OnboardingFlowCoordinator: View {
     private var nextButtonTitle: String {
         switch phase {
         case .account:
-            if !isPasswordPhase {
-                return "Continue"
-            } else {
-                return isExistingUser ? "Sign In" : "Create Account"
-            }
+            return isExistingUser ? "Sign In" : "Create Account"
         case .conditions:
             return "Generate My Plan"
         default:
@@ -340,11 +324,7 @@ public struct OnboardingFlowCoordinator: View {
         withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
             switch phase {
             case .account:
-                if isPasswordPhase {
-                    isPasswordPhase = false
-                } else {
-                    phase = .welcome
-                }
+                phase = .welcome
             case .personal:
                 phase = .account
             case .screenTime:
@@ -364,11 +344,7 @@ public struct OnboardingFlowCoordinator: View {
 
         switch phase {
         case .account:
-            if !isPasswordPhase {
-                handleEmailCheck()
-            } else {
-                handlePasswordSubmit()
-            }
+            handleAccountSubmit()
 
         case .personal:
             if profile.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -399,18 +375,14 @@ public struct OnboardingFlowCoordinator: View {
         }
     }
 
-    // Phase 1: Email Existence Check via Supabase
-    private func handleEmailCheck() {
+    // Real Supabase Auth sign-in or sign-up. Email + password are both on screen at once and
+    // submitted together — "Sign In" vs "Create Account" only changes which Supabase Auth call
+    // this makes, not what's asked for. Supabase Auth can't tell us in advance whether an email
+    // already has an account (deliberate, to prevent email enumeration), so the user picks which
+    // flow they want via the segmented toggle; an empty email never silently guest-skips here —
+    // that's only "Continue as Guest" below.
+    private func handleAccountSubmit() {
         let cleanEmail = profile.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-
-        if cleanEmail.isEmpty {
-            profile.email = ""
-            SupabaseService.shared.saveLocalProfile(profile)
-            withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
-                phase = .personal
-            }
-            return
-        }
 
         let emailPattern = #"^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$"#
         guard cleanEmail.range(of: emailPattern, options: [.regularExpression, .caseInsensitive]) != nil else {
@@ -418,24 +390,7 @@ public struct OnboardingFlowCoordinator: View {
             return
         }
 
-        isCheckingUser = true
-        errorMessage = nil
-        Task {
-            let exists = await SupabaseService.shared.checkUserExists(email: cleanEmail)
-            self.isCheckingUser = false
-            self.isExistingUser = exists
-            withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
-                self.isPasswordPhase = true
-            }
-        }
-    }
-
-    // Phase 2: Password Verification or Account Creation
-    private func handlePasswordSubmit() {
-        let cleanEmail = profile.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-
         if isExistingUser {
-            // Sign in existing user
             guard !password.isEmpty else {
                 errorMessage = "Please enter your password to sign in."
                 return
@@ -443,34 +398,29 @@ public struct OnboardingFlowCoordinator: View {
             isCheckingUser = true
             errorMessage = nil
             Task {
-                let verified = await SupabaseService.shared.verifyPassword(email: cleanEmail, password: password)
-                if verified {
-                    if let existingProfile = await SupabaseService.shared.fetchProfile(byEmail: cleanEmail) {
-                        self.profile = existingProfile
-                        SupabaseService.shared.saveLocalProfile(existingProfile)
+                let result = await SupabaseService.shared.signIn(email: cleanEmail, password: password)
+                self.isCheckingUser = false
+                switch result {
+                case .success(let existingProfile):
+                    self.profile = existingProfile
 
-                        // If user previously completed onboarding, restore plan directly and finish
-                        if !existingProfile.name.isEmpty && !existingProfile.recommendedExerciseIds.isEmpty {
-                            let bp = PersonalizationEngine.shared.generateBlueprint(from: existingProfile)
-                            PersonalizationEngine.shared.applyBlueprint(bp, to: &self.profile)
-                            self.isCheckingUser = false
-                            withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
-                                onFinished()
-                            }
-                            return
+                    // If user previously completed onboarding, restore plan directly and finish
+                    if !existingProfile.name.isEmpty && !existingProfile.recommendedExerciseIds.isEmpty {
+                        let bp = PersonalizationEngine.shared.generateBlueprint(from: existingProfile)
+                        PersonalizationEngine.shared.applyBlueprint(bp, to: &self.profile)
+                        withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+                            onFinished()
                         }
+                        return
                     }
-                    self.isCheckingUser = false
                     withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
                         phase = .personal
                     }
-                } else {
-                    self.isCheckingUser = false
-                    self.errorMessage = "Incorrect password. Please try again."
+                case .failure(let error):
+                    self.errorMessage = error.localizedDescription
                 }
             }
         } else {
-            // Create brand new account
             guard password.count >= 6 else {
                 errorMessage = "Password must be at least 6 characters."
                 return
@@ -483,7 +433,7 @@ public struct OnboardingFlowCoordinator: View {
             isCheckingUser = true
             errorMessage = nil
             Task {
-                let result = await SupabaseService.shared.createUser(
+                let result = await SupabaseService.shared.signUp(
                     email: cleanEmail,
                     password: password,
                     name: profile.name.isEmpty ? nil : profile.name
@@ -502,53 +452,45 @@ public struct OnboardingFlowCoordinator: View {
         }
     }
 
-    // Apple Sign In Handler
+    // Apple Sign In Handler — exchanges Apple's identity token for a real Supabase session
+    // instead of fabricating a random-password account.
     private func handleAppleSignIn(_ auth: ASAuthorization) {
-        if let appleIDCredential = auth.credential as? ASAuthorizationAppleIDCredential {
-            let email = (appleIDCredential.email ?? "\(appleIDCredential.user.prefix(12))@privaterelay.appleid.com").lowercased()
-            let fullName = [appleIDCredential.fullName?.givenName, appleIDCredential.fullName?.familyName]
-                .compactMap { $0 }
-                .joined(separator: " ")
+        guard let appleIDCredential = auth.credential as? ASAuthorizationAppleIDCredential,
+              let tokenData = appleIDCredential.identityToken,
+              let identityToken = String(data: tokenData, encoding: .utf8) else {
+            errorMessage = "Apple Sign In failed. Please try again."
+            return
+        }
 
-            profile.email = email
-            if !fullName.isEmpty {
-                profile.name = fullName
-            }
+        let fullName = [appleIDCredential.fullName?.givenName, appleIDCredential.fullName?.familyName]
+            .compactMap { $0 }
+            .joined(separator: " ")
 
-            isCheckingUser = true
-            errorMessage = nil
-            Task {
-                let exists = await SupabaseService.shared.checkUserExists(email: email)
-                if exists {
-                    if let existing = await SupabaseService.shared.fetchProfile(byEmail: email) {
-                        self.profile = existing
-                        SupabaseService.shared.saveLocalProfile(existing)
+        isCheckingUser = true
+        errorMessage = nil
+        Task {
+            let result = await SupabaseService.shared.signInWithApple(
+                identityToken: identityToken,
+                fullName: fullName.isEmpty ? nil : fullName
+            )
+            self.isCheckingUser = false
+            switch result {
+            case .success(let signedInProfile):
+                self.profile = signedInProfile
 
-                        if !existing.name.isEmpty && !existing.recommendedExerciseIds.isEmpty {
-                            let bp = PersonalizationEngine.shared.generateBlueprint(from: existing)
-                            PersonalizationEngine.shared.applyBlueprint(bp, to: &self.profile)
-                            self.isCheckingUser = false
-                            withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
-                                onFinished()
-                            }
-                            return
-                        }
+                if !signedInProfile.name.isEmpty && !signedInProfile.recommendedExerciseIds.isEmpty {
+                    let bp = PersonalizationEngine.shared.generateBlueprint(from: signedInProfile)
+                    PersonalizationEngine.shared.applyBlueprint(bp, to: &self.profile)
+                    withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+                        onFinished()
                     }
-                } else {
-                    let randomPass = "apple_\(UUID().uuidString.prefix(12))"
-                    let result = await SupabaseService.shared.createUser(
-                        email: email,
-                        password: randomPass,
-                        name: fullName.isEmpty ? nil : fullName
-                    )
-                    if case .success(let created) = result {
-                        self.profile = created
-                    }
+                    return
                 }
-                self.isCheckingUser = false
                 withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
                     phase = .personal
                 }
+            case .failure(let error):
+                self.errorMessage = error.localizedDescription
             }
         }
     }
@@ -561,9 +503,9 @@ public struct OnboardingFlowCoordinator: View {
         profile.updatedAt = Date()
         SupabaseService.shared.saveLocalProfile(profile)
 
-        // Upsert to Supabase with latest blueprint and credentials
+        // Upsert latest blueprint to Supabase (credentials are already handled by Supabase Auth, not this call)
         Task {
-            _ = await SupabaseService.shared.upsertProfile(profile, password: password.isEmpty ? nil : password)
+            _ = await SupabaseService.shared.upsertProfile(profile)
         }
 
         withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {

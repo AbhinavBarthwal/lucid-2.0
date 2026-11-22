@@ -163,9 +163,9 @@ public struct OnboardingView: View {
     private var personalSlide: some View {
         VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("To fix that !!!")
+                Text("Here's the fix.")
                     .foregroundStyle(Color(white: 0.58))
-                Text("Let us not do some")
+                Text("Let's skip the")
                     .foregroundStyle(Color(white: 0.58))
 
                 HStack(spacing: 8) {
@@ -196,7 +196,7 @@ public struct OnboardingView: View {
                         .foregroundStyle(Color(white: 0.58))
                 }
 
-                Text("their problem")
+                Text("your problem")
                     .foregroundStyle(Color(white: 0.58))
             }
             .font(Typography.largeTitle(weight: .bold, design: .rounded))
@@ -223,11 +223,11 @@ public struct OnboardingView: View {
         } label: {
             HStack(spacing: 8) {
                 if step.isLastStep {
-                    Image(systemName: "lock.open.fill")
+                    Image(systemName: "arrow.right.circle.fill")
                         .font(Typography.subheadline(weight: .bold))
                         .transition(.scale.combined(with: .opacity))
                 }
-                Text(step.isLastStep ? "Unlock Lucid" : "Next")
+                Text(step.isLastStep ? "Get Started" : "Next")
                     .font(Typography.headline(weight: .semibold, design: .rounded))
             }
             .foregroundStyle(.white)

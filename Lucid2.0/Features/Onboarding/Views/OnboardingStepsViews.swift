@@ -8,122 +8,171 @@
 import SwiftUI
 import AuthenticationServices
 
-// MARK: - Step 1: Account Step (Two-Phase Auth + Apple Sign-In)
+// MARK: - Step 1: Account Step (Unified Sign In / Create Account)
+//
+// One screen, one mental model: a Sign In / Create Account toggle up top picks the mode,
+// and the same email + password fields underneath submit through a single action — instead
+// of the previous two-phase flow (choose a button -> re-enter email context -> then see
+// password fields), which made the email field look disconnected from the two CTAs above it,
+// and silently treated an empty email on either CTA as "continue as guest".
 public struct AccountStepView: View {
     @Binding public var email: String
     @Binding public var password: String
     @Binding public var confirmPassword: String
     @Binding public var isExistingUser: Bool
-    @Binding public var isPasswordPhase: Bool
 
     public var isChecking: Bool
     public var errorMessage: String?
-    public var onContinueWithEmail: () -> Void
     public var onSignInWithApple: (ASAuthorization) -> Void
     public var onContinueAsGuest: () -> Void
-    public var onChangeEmail: () -> Void
 
     public init(
         email: Binding<String>,
         password: Binding<String>,
         confirmPassword: Binding<String>,
         isExistingUser: Binding<Bool>,
-        isPasswordPhase: Binding<Bool>,
         isChecking: Bool,
         errorMessage: String?,
-        onContinueWithEmail: @escaping () -> Void,
         onSignInWithApple: @escaping (ASAuthorization) -> Void,
-        onContinueAsGuest: @escaping () -> Void,
-        onChangeEmail: @escaping () -> Void
+        onContinueAsGuest: @escaping () -> Void
     ) {
         self._email = email
         self._password = password
         self._confirmPassword = confirmPassword
         self._isExistingUser = isExistingUser
-        self._isPasswordPhase = isPasswordPhase
         self.isChecking = isChecking
         self.errorMessage = errorMessage
-        self.onContinueWithEmail = onContinueWithEmail
         self.onSignInWithApple = onSignInWithApple
         self.onContinueAsGuest = onContinueAsGuest
-        self.onChangeEmail = onChangeEmail
     }
 
     public var body: some View {
+        ScrollView {
         VStack(alignment: .leading, spacing: 22) {
-            if !isPasswordPhase {
-                // PHASE 1: EMAIL & APPLE SIGN-IN
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Get Started")
-                        .font(Typography.title(weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(isExistingUser ? "Welcome Back" : "Get Started")
+                    .font(Typography.title(weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
 
-                    Text("Save your personalized plan and synchronize across devices.")
-                        .font(Typography.subheadline())
-                        .foregroundStyle(Color.white.opacity(0.65))
-                        .lineLimit(nil)
-                }
+                Text(isExistingUser
+                     ? "Sign in to restore your saved plan."
+                     : "Save your personalized plan and synchronize across devices.")
+                    .font(Typography.subheadline())
+                    .foregroundStyle(Color.white.opacity(0.65))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
-                // Apple Sign-In Button
-                SignInWithAppleButton(
-                    .continue,
-                    onRequest: { request in
-                        request.requestedScopes = [.fullName, .email]
-                    },
-                    onCompletion: { result in
-                        switch result {
-                        case .success(let auth):
-                            onSignInWithApple(auth)
-                        case .failure(let err):
-                            print("Apple Sign In error: \(err)")
-                        }
+            Picker("Account mode", selection: $isExistingUser) {
+                Text("Create Account").tag(false)
+                Text("Sign In").tag(true)
+            }
+            .pickerStyle(.segmented)
+
+            // Apple Sign-In Button
+            SignInWithAppleButton(
+                .continue,
+                onRequest: { request in
+                    request.requestedScopes = [.fullName, .email]
+                },
+                onCompletion: { result in
+                    switch result {
+                    case .success(let auth):
+                        onSignInWithApple(auth)
+                    case .failure(let err):
+                        print("Apple Sign In error: \(err)")
                     }
-                )
-                .signInWithAppleButtonStyle(.white)
-                .frame(height: 52)
-                .clipShape(RoundedRectangle(cornerRadius: 44, style: .continuous))
-                .shadow(color: Color.black.opacity(0.4), radius: 10, y: 4)
-
-                // Divider
-                HStack(spacing: 12) {
-                    Rectangle()
-                        .fill(Color.white.opacity(0.12))
-                        .frame(height: 1)
-                    Text("or with email")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(Color.white.opacity(0.4))
-                    Rectangle()
-                        .fill(Color.white.opacity(0.12))
-                        .frame(height: 1)
                 }
-                .padding(.vertical, 4)
+            )
+            .signInWithAppleButtonStyle(.white)
+            .frame(height: 52)
+            .clipShape(RoundedRectangle(cornerRadius: 44, style: .continuous))
+            .shadow(color: Color.black.opacity(0.4), radius: 10, y: 4)
 
-                // Email Input Field
+            // Divider
+            HStack(spacing: 12) {
+                Rectangle()
+                    .fill(Color.white.opacity(0.12))
+                    .frame(height: 1)
+                Text("or with email")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(Color.white.opacity(0.4))
+                Rectangle()
+                    .fill(Color.white.opacity(0.12))
+                    .frame(height: 1)
+            }
+            .padding(.vertical, 4)
+
+            // Email Input Field
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Email Address")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Palette.amber)
+
+                HStack(spacing: 12) {
+                    Image(systemName: "envelope.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(Color.white.opacity(0.4))
+
+                    TextField("name@example.com", text: $email)
+                        .textContentType(.emailAddress)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .foregroundStyle(.white)
+                }
+                .padding(.horizontal, 16)
+                .frame(minHeight: 52)
+                .background(Color.white.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
+                )
+            }
+
+            // Password Field
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Password")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Palette.amber)
+
+                HStack(spacing: 12) {
+                    Image(systemName: "lock.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(Color.white.opacity(0.4))
+
+                    SecureField(isExistingUser ? "Enter your password" : "Create a password", text: $password)
+                        .textContentType(isExistingUser ? .password : .newPassword)
+                        .foregroundStyle(.white)
+                }
+                .padding(.horizontal, 16)
+                .frame(minHeight: 52)
+                .background(Color.white.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
+                )
+            }
+
+            // Confirm Password — only needed when creating a new account
+            if !isExistingUser {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Email Address")
+                    Text("Confirm Password")
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(Palette.amber)
 
                     HStack(spacing: 12) {
-                        Image(systemName: "envelope.fill")
+                        Image(systemName: "lock.shield.fill")
                             .font(.subheadline)
                             .foregroundStyle(Color.white.opacity(0.4))
 
-                        TextField("name@example.com", text: $email)
-                            .textContentType(.emailAddress)
-                            .keyboardType(.emailAddress)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
+                        SecureField("Repeat your password", text: $confirmPassword)
+                            .textContentType(.newPassword)
                             .foregroundStyle(.white)
-
-                        if isChecking {
-                            ProgressView()
-                                .tint(Palette.amber)
-                                .scaleEffect(0.85)
-                        }
                     }
                     .padding(.horizontal, 16)
-                    .frame(height: 52)
+                    .frame(minHeight: 52)
                     .background(Color.white.opacity(0.06))
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     .overlay(
@@ -131,98 +180,7 @@ public struct AccountStepView: View {
                             .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
                     )
                 }
-
-            } else {
-                // PHASE 2: PASSWORD INPUT (LOGIN VS SIGNUP)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(isExistingUser ? "Welcome Back!" : "Create Your Password")
-                        .font(Typography.title(weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-
-                    Text(isExistingUser
-                         ? "Enter your password to restore your saved profile."
-                         : "Set a secure password for your new Lucid account.")
-                        .font(Typography.subheadline())
-                        .foregroundStyle(Color.white.opacity(0.65))
-                }
-
-                // Email Badge with "Change" button
-                HStack(spacing: 10) {
-                    Image(systemName: "person.crop.circle.fill")
-                        .font(.headline)
-                        .foregroundStyle(Palette.amber)
-
-                    Text(email)
-                        .font(.footnote.weight(.medium))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-
-                    Spacer()
-
-                    Button("Change", action: onChangeEmail)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Palette.amber)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(Color.white.opacity(0.06))
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(Palette.amber.opacity(0.25), lineWidth: 1)
-                )
-
-                // Password Fields
-                VStack(spacing: 14) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Password")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(Palette.amber)
-
-                        HStack(spacing: 12) {
-                            Image(systemName: "lock.fill")
-                                .font(.subheadline)
-                                .foregroundStyle(Color.white.opacity(0.4))
-
-                            SecureField("Enter your password", text: $password)
-                                .foregroundStyle(.white)
-                        }
-                        .padding(.horizontal, 16)
-                        .frame(height: 52)
-                        .background(Color.white.opacity(0.06))
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
-                        )
-                    }
-
-                    if !isExistingUser {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Confirm Password")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(Palette.amber)
-
-                            HStack(spacing: 12) {
-                                Image(systemName: "lock.shield.fill")
-                                    .font(.subheadline)
-                                    .foregroundStyle(Color.white.opacity(0.4))
-
-                                SecureField("Repeat your password", text: $confirmPassword)
-                                    .foregroundStyle(.white)
-                            }
-                            .padding(.horizontal, 16)
-                            .frame(height: 52)
-                            .background(Color.white.opacity(0.06))
-                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                    .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
-                            )
-                        }
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                    }
-                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
             // Error Message Banner
@@ -243,9 +201,7 @@ public struct AccountStepView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
 
-            Spacer()
-
-            // Continue as Guest Option
+            // Continue as Guest Option — the only path that skips email/password entirely
             Button(action: onContinueAsGuest) {
                 HStack(spacing: 6) {
                     Text("Continue as Guest / Skip for now")
@@ -259,9 +215,47 @@ public struct AccountStepView: View {
                 .padding(.vertical, 8)
             }
             .buttonStyle(.plain)
+            .padding(.top, 4)
         }
         .padding(.top, 16)
-        .animation(.spring(response: 0.45, dampingFraction: 0.85), value: isPasswordPhase)
+        .padding(.bottom, 12)
+        .animation(.spring(response: 0.45, dampingFraction: 0.85), value: isExistingUser)
+        }
+        .scrollBounceBehavior(.basedOnSize)
+    }
+}
+
+#Preview("Account - Create") {
+    ZStack {
+        Color.black.ignoresSafeArea()
+        AccountStepView(
+            email: .constant(""),
+            password: .constant(""),
+            confirmPassword: .constant(""),
+            isExistingUser: .constant(false),
+            isChecking: false,
+            errorMessage: nil,
+            onSignInWithApple: { _ in },
+            onContinueAsGuest: {}
+        )
+        .padding(.horizontal, 24)
+    }
+}
+
+#Preview("Account - Sign In") {
+    ZStack {
+        Color.black.ignoresSafeArea()
+        AccountStepView(
+            email: .constant("abhinav@example.com"),
+            password: .constant(""),
+            confirmPassword: .constant(""),
+            isExistingUser: .constant(true),
+            isChecking: false,
+            errorMessage: nil,
+            onSignInWithApple: { _ in },
+            onContinueAsGuest: {}
+        )
+        .padding(.horizontal, 24)
     }
 }
 
@@ -301,7 +295,7 @@ public struct PersonalDetailsStepView: View {
                         .autocorrectionDisabled()
                 }
                 .padding(.horizontal, 18)
-                .frame(height: 60)
+                .frame(minHeight: 60)
                 .background(Color.white.opacity(0.06))
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .overlay(
@@ -321,11 +315,6 @@ public struct ScreenTimeStepView: View {
     @Binding public var hours: Double
     @Binding public var primaryActivity: String
     @Binding public var peakFatigueTime: String
-    @Binding public var actualHours: Double?
-
-    @State private var isAuthorized: Bool = ScreenTimeService.shared.isAuthorized
-    @State private var isConnecting: Bool = false
-    @State private var authErrorMessage: String? = nil
 
     private let activities = [
         ("Coding & Reading", "laptopcomputer"),
@@ -344,13 +333,11 @@ public struct ScreenTimeStepView: View {
     public init(
         hours: Binding<Double>,
         primaryActivity: Binding<String>,
-        peakFatigueTime: Binding<String>,
-        actualHours: Binding<Double?>
+        peakFatigueTime: Binding<String>
     ) {
         self._hours = hours
         self._primaryActivity = primaryActivity
         self._peakFatigueTime = peakFatigueTime
-        self._actualHours = actualHours
     }
 
     public var body: some View {
@@ -400,9 +387,6 @@ public struct ScreenTimeStepView: View {
                 .frame(maxWidth: .infinity)
                 .cardBackground(top: Palette.cardTop, bottom: Palette.cardBottom, corner: 24)
 
-                // Apple Screen Time API Verification / Connection Card
-                screenTimeAPICard
-
                 // Primary Activity Selection
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Primary Screen Focus")
@@ -426,7 +410,7 @@ public struct ScreenTimeStepView: View {
                                         .lineLimit(1)
                                 }
                                 .padding(.horizontal, 12)
-                                .frame(height: 46)
+                                .frame(minHeight: 46)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .background(
                                     RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -481,184 +465,6 @@ public struct ScreenTimeStepView: View {
             }
             .padding(.top, 16)
             .padding(.bottom, 24)
-        }
-    }
-
-    // MARK: - Screen Time API Card
-    private var screenTimeAPICard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color(red: 0.12, green: 0.28, blue: 0.65).opacity(0.25))
-                        .frame(width: 36, height: 36)
-
-                    Image(systemName: "hourglass.badge.eye")
-                        .font(Typography.subheadline(weight: .bold))
-                        .foregroundStyle(Color(red: 0.35, green: 0.65, blue: 1.0))
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Apple Screen Time API")
-                        .font(Typography.subheadline(weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-
-                    Text(isAuthorized ? "Connected to FamilyControls" : "Real Device Activity Sync")
-                        .font(Typography.caption2(weight: .medium))
-                        .foregroundStyle(Color.white.opacity(0.55))
-                }
-
-                Spacer()
-
-                if isAuthorized {
-                    HStack(spacing: 4) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(Typography.caption2(weight: .bold))
-                        Text("Connected")
-                            .font(Typography.caption2(weight: .bold, design: .rounded))
-                    }
-                    .foregroundStyle(Color.green)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(Color.green.opacity(0.14)))
-                } else {
-                    HStack(spacing: 4) {
-                        Image(systemName: "lock.shield")
-                            .font(Typography.caption2(weight: .medium))
-                        Text("Not Linked")
-                            .font(Typography.caption2(weight: .medium, design: .rounded))
-                    }
-                    .foregroundStyle(Color.white.opacity(0.45))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(Color.white.opacity(0.06)))
-                }
-            }
-
-            if isAuthorized {
-                // When authorized: Show verified Device Activity comparison
-                if let actual = actualHours {
-                    let delta = actual - hours
-                    let diffString = String(format: "%.1f", abs(delta))
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: delta > 0 ? "exclamationmark.triangle.fill" : "checkmark.seal.fill")
-                            .font(Typography.subheadline())
-                            .foregroundStyle(delta > 0 ? Palette.amber : Color.green)
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(delta > 0 ? "Screen Time Gap Identified" : "Healthy Self-Awareness")
-                                .font(Typography.subheadline(weight: .semibold, design: .rounded))
-                                .foregroundStyle(.white)
-
-                            Text(delta > 0
-                                 ? "Apple Screen Time reports ~\(String(format: "%.1f", actual)) hrs/day (\(diffString) hrs higher than your estimate). Luc will account for this extra strain in your daily training."
-                                 : "Device Activity averages ~\(String(format: "%.1f", actual)) hrs/day, matching your perception closely. Great awareness!")
-                                .font(Typography.footnote())
-                                .foregroundStyle(Color.white.opacity(0.75))
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .fill(Palette.amber.opacity(0.08))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                    .strokeBorder(Palette.amber.opacity(0.25), lineWidth: 1)
-                            )
-                    )
-                }
-            } else {
-                // Not authorized: Don't guess. Provide honest prompt & connect button
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Lucid doesn't guess your habits. Connect Apple Screen Time to verify your true daily screen exposure and prevent eye strain lockups.")
-                        .font(Typography.footnote())
-                        .foregroundStyle(Color.white.opacity(0.7))
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    if let err = authErrorMessage {
-                        Text(err)
-                            .font(Typography.caption2())
-                            .foregroundStyle(Color.red.opacity(0.9))
-                    }
-
-                    Button {
-                        connectScreenTime()
-                    } label: {
-                        HStack(spacing: 8) {
-                            if isConnecting {
-                                ProgressView()
-                                    .tint(.white)
-                                    .scaleEffect(0.8)
-                            } else {
-                                Image(systemName: "link.badge.plus")
-                                    .font(Typography.subheadline(weight: .semibold))
-                            }
-
-                            Text(isConnecting ? "Requesting Access..." : "Connect Screen Time")
-                                .font(Typography.subheadline(weight: .semibold, design: .rounded))
-                        }
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 42)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(
-                                    LinearGradient(
-                                        colors: [Color(red: 0.15, green: 0.35, blue: 0.85), Color(red: 0.10, green: 0.22, blue: 0.60)],
-                                        startPoint: .top,
-                                        endPoint: .bottom
-                                    )
-                                )
-                                .glassEffect(.clear, in: .rect(cornerRadius: 12))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isConnecting)
-                }
-            }
-        }
-        .padding(18)
-        .frame(maxWidth: .infinity)
-        .cardBackground(top: Color(red: 0.08, green: 0.12, blue: 0.22), bottom: Color(red: 0.05, green: 0.07, blue: 0.15), corner: 22)
-        .onAppear {
-            isAuthorized = ScreenTimeService.shared.isAuthorized
-            if isAuthorized && actualHours == nil {
-                actualHours = ScreenTimeService.shared.fetchActualDailyScreenTime(estimated: hours)
-            }
-        }
-        .onChange(of: hours) { _, newHours in
-            if isAuthorized {
-                actualHours = ScreenTimeService.shared.fetchActualDailyScreenTime(estimated: newHours)
-            }
-        }
-    }
-
-    private func connectScreenTime() {
-        isConnecting = true
-        authErrorMessage = nil
-        Task {
-            do {
-                try await ScreenTimeService.shared.requestAuthorization()
-                await MainActor.run {
-                    isConnecting = false
-                    isAuthorized = ScreenTimeService.shared.isAuthorized
-                    if isAuthorized {
-                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                        actualHours = ScreenTimeService.shared.fetchActualDailyScreenTime(estimated: hours)
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    isConnecting = false
-                    authErrorMessage = "Authorization failed: \(error.localizedDescription)"
-                }
-            }
         }
     }
 }
@@ -736,7 +542,7 @@ public struct EyePowerStepView: View {
                     .foregroundStyle(isSelected ? .white : Color.white.opacity(0.7))
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 52)
+            .frame(minHeight: 52)
             .background(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(isSelected ? Palette.amber.opacity(0.14) : Color.white.opacity(0.06))
@@ -750,47 +556,76 @@ public struct EyePowerStepView: View {
         .buttonStyle(.plain)
     }
 
+    /// Common prescription values so users don't have to tap the 0.25-step stepper 10-20+ times
+    /// to reach a typical number like -6.00.
+    private static let quickDiopterValues: [Double] = [-8.0, -6.0, -4.0, -3.0, -2.0, -1.5, -1.0, -0.5, 0.5, 1.0, 1.5, 2.0, 3.0]
+
     private func diopterPicker(label: String, value: Binding<Double>) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(label)
-                    .font(Typography.subheadline(weight: .bold))
-                    .foregroundStyle(.white)
-
-                Text(formattedDiopter(value.wrappedValue))
-                    .font(Typography.title3(weight: .bold, design: .rounded))
-                    .foregroundStyle(Palette.amber)
-            }
-
-            Spacer()
-
-            HStack(spacing: 12) {
-                Button {
-                    value.wrappedValue = max(-12.0, value.wrappedValue - 0.25)
-                } label: {
-                    Image(systemName: "minus")
-                        .font(.headline)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(label)
+                        .font(Typography.subheadline(weight: .bold))
                         .foregroundStyle(.white)
-                        .frame(width: 38, height: 38)
-                        .background(
-                            Circle()
-                                .fill(Color.white.opacity(0.08))
-                                .glassEffect(.clear, in: .circle)
-                        )
+
+                    Text(formattedDiopter(value.wrappedValue))
+                        .font(Typography.title3(weight: .bold, design: .rounded))
+                        .foregroundStyle(Palette.amber)
                 }
 
-                Button {
-                    value.wrappedValue = min(8.0, value.wrappedValue + 0.25)
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                        .frame(width: 38, height: 38)
-                        .background(
-                            Circle()
-                                .fill(Color.white.opacity(0.08))
-                                .glassEffect(.clear, in: .circle)
-                        )
+                Spacer()
+
+                HStack(spacing: 12) {
+                    Button {
+                        value.wrappedValue = max(-12.0, value.wrappedValue - 0.25)
+                    } label: {
+                        Image(systemName: "minus")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .frame(width: 38, height: 38)
+                            .background(
+                                Circle()
+                                    .fill(Color.white.opacity(0.08))
+                                    .glassEffect(.clear, in: .circle)
+                            )
+                    }
+
+                    Button {
+                        value.wrappedValue = min(8.0, value.wrappedValue + 0.25)
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .frame(width: 38, height: 38)
+                            .background(
+                                Circle()
+                                    .fill(Color.white.opacity(0.08))
+                                    .glassEffect(.clear, in: .circle)
+                            )
+                    }
+                }
+            }
+
+            // Quick-select common prescriptions, so reaching e.g. -6.00 doesn't take ~18 taps
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(Self.quickDiopterValues, id: \.self) { quick in
+                        let isSelected = abs(value.wrappedValue - quick) < 0.01
+                        Button {
+                            value.wrappedValue = quick
+                        } label: {
+                            Text(String(format: "%+.2f", quick))
+                                .font(Typography.caption(weight: .semibold, design: .rounded))
+                                .foregroundStyle(isSelected ? Color.black : Color.white.opacity(0.8))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 7)
+                                .background(
+                                    Capsule()
+                                        .fill(isSelected ? Palette.amber : Color.white.opacity(0.07))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
         }

@@ -38,3 +38,5 @@ Icon
 # Old subfolder with separate git history
 /Lucid/
 .git.backup/
+
+.claude/settings.local.json
